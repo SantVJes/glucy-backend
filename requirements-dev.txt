@@ -1,4 +1,5 @@
-# Herramientas de desarrollo. Las dependencias de la API llegan en la fase 2.
+# Herramientas de desarrollo, más las dependencias de la API para que las pruebas corran.
+-r requirements.txt
 pytest>=8.0
 ruff>=0.6
 httpx>=0.27
