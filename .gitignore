@@ -30,3 +30,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Base local de desarrollo (SQLite, D-4). Trae datos de salud aunque sean de prueba.
+glucy.db
+*.db-journal
