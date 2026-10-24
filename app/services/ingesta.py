@@ -18,13 +18,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
-from app.models.tablas import Base, LecturaGlucosa
+from app.models.tablas import Base, Comida, DosisInsulina, LecturaGlucosa
 from app.repositories import cuarentena as repo_cuarentena
 from app.repositories import lotes as repo_lotes
 from app.repositories import usuarios as repo_usuarios
+from app.schemas.comidas import COLUMNAS_MEALS, ComidaEntrada
+from app.schemas.dosis import COLUMNAS_INSULIN_DOSES, DosisEntrada
 from app.schemas.lecturas import COLUMNAS_GLUCOSE_READINGS, LecturaEntrada
 from app.schemas.lotes import RenglonEnCuarentena
-from referencia.reglas_clinicas import validar_lectura
+from referencia.reglas_clinicas import validar_comida, validar_dosis, validar_lectura
 
 # Los motivos que la app y el panel del paso 4 van a leer, en español y diciendo qué arreglar.
 # Lo que no está aquí sale con el mensaje de Pydantic tal cual.
@@ -78,6 +80,38 @@ LOTE_LECTURAS = DescriptorDeLote(
     columnas=COLUMNAS_GLUCOSE_READINGS,
     modelo=LecturaGlucosa,
     validar=_validar_lectura,
+)
+
+
+def _validar_comida(comida: ComidaEntrada, ahora: datetime) -> str | None:
+    """`carbs_g` ya es el total: la referencia no vuelve a multiplicar por las porciones."""
+    rechazo = validar_comida(
+        comida.carbs_g, comida.tiempo_absorcion_min, comida.porciones, comida.ts_utc, ahora
+    )
+    return rechazo.motivo if rechazo else None
+
+
+LOTE_COMIDAS = DescriptorDeLote(
+    tabla="meals",
+    esquema=ComidaEntrada,
+    columnas=COLUMNAS_MEALS,
+    modelo=Comida,
+    validar=_validar_comida,
+)
+
+
+def _validar_dosis(dosis: DosisEntrada, ahora: datetime) -> str | None:
+    """Que la dosis sea anotable, no que sea la adecuada (regla 7)."""
+    rechazo = validar_dosis(dosis.unidades, dosis.ts_utc, ahora)
+    return rechazo.motivo if rechazo else None
+
+
+LOTE_DOSIS = DescriptorDeLote(
+    tabla="insulin_doses",
+    esquema=DosisEntrada,
+    columnas=COLUMNAS_INSULIN_DOSES,
+    modelo=DosisInsulina,
+    validar=_validar_dosis,
 )
 
 
