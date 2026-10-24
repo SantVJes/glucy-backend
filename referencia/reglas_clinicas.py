@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 # ---------------------------------------------------------------------------
@@ -34,16 +34,25 @@ ABSORCION_DEFECTO_MIN = 180  # D-8; presets 30 (rápida) y 300 (lenta)
 ABSORCION_MIN, ABSORCION_MAX = 30, 300
 
 DIA_DEFECTO_H = 5            # duración de acción de la insulina, rango 2-8
+DIA_RANGO_H = (2, 8)
 PICO_INSULINA_MIN = 75       # insulinas rápidas (55 en ultrarrápidas)
 
 FRESCURA_SENSOR_MIN = 15     # D-13: recomendación adoptada, pendiente de confirmar
 INTERPOLACION_MAX_MIN = 15   # RF-23
 TASA_CAMBIO_IMPOSIBLE = 4.0  # mg/dL por minuto, solo en serie continua
 
+UMBRAL_HIPO_RANGO = (50, 90)     # lo que el perfil puede mover
+UMBRAL_HIPER_RANGO = (140, 300)
+
+CARBS_MIN_G = 0
 CARBS_MAX_G = 300
+INSULINA_MIN_UI = 0          # estricto: cero no es una dosis, es un campo sin llenar
 INSULINA_MAX_UI = 50
+INSULINA_RESOLUCION_UI = 0.5  # la pluma dosifica de media en media unidad
 PESO_MIN_KG, PESO_MAX_KG = 25, 300
 EDAD_MINIMA = 15
+EDAD_MAXIMA = 120
+TIPO_INSULINA_MAX_CARACTERES = 40
 TIMEOUT_MODELO_LENGUAJE_S = 10
 
 
@@ -93,6 +102,107 @@ def validar_lectura(
     return None
 
 
+def validar_comida(
+    carbs_g: float,
+    tiempo_absorcion_min: int,
+    porciones: float,
+    ts_utc: datetime,
+    ahora: datetime,
+) -> Rechazo | None:
+    """Espejo de `Validacion.validarComida` en Swift, con el mismo orden de comprobaciones.
+
+    `carbs_g` son los gramos TOTALES, ya multiplicados por las porciones: volver a multiplicar
+    aquí duplicaría el COB. `porciones` viaja solo como información, y por eso solo se pide
+    que sea positiva.
+
+    El orden decide qué motivo se reporta cuando la comida falla por dos cosas a la vez:
+    1. rango de carbohidratos, 2. absorción, 3. porciones, 4. hora no futura.
+    """
+    if not (CARBS_MIN_G <= carbs_g <= CARBS_MAX_G):
+        return Rechazo(f"carbohidratos fuera del rango {CARBS_MIN_G}-{CARBS_MAX_G} g")
+    if not (ABSORCION_MIN <= tiempo_absorcion_min <= ABSORCION_MAX):
+        return Rechazo(
+            f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min"
+        )
+    if not porciones > 0:
+        return Rechazo("porciones tiene que ser mayor que cero")
+    # Una comida futura llegaría a `cob` con minutos negativos.
+    if ts_utc > ahora:
+        return Rechazo("marca de tiempo futura: corrompe el orden de la serie")
+    return None
+
+
+def validar_dosis(unidades: float, ts_utc: datetime, ahora: datetime) -> Rechazo | None:
+    """Espejo de `Validacion.validarDosis` en Swift, con el mismo orden de comprobaciones.
+
+    Revisa que la dosis sea *anotable*, no que sea la adecuada: opinar sobre la cantidad sería
+    dosificar (regla 7). Por eso no recibe carbohidratos, glucosa ni ningún factor.
+
+    `unidades % 0.5` es exacto porque 0.5 se representa sin error en binario (no así 0.1), y
+    los negativos ya se rechazaron antes, así que el `%` de Python y el `truncatingRemainder`
+    de Swift dan lo mismo.
+
+    Orden: 1. mayor que cero, 2. a lo más 50 UI, 3. múltiplo de 0.5, 4. hora no futura.
+    """
+    if not unidades > INSULINA_MIN_UI:
+        return Rechazo("unidades tiene que ser mayor que cero: cero no es una dosis")
+    if not unidades <= INSULINA_MAX_UI:
+        return Rechazo(f"unidades fuera del rango {INSULINA_MIN_UI}-{INSULINA_MAX_UI} UI")
+    if unidades % INSULINA_RESOLUCION_UI != 0:
+        return Rechazo(
+            f"unidades fuera de la resolución de {INSULINA_RESOLUCION_UI} UI de la pluma"
+        )
+    # Una dosis futura contaría entera como insulina activa antes de haberse aplicado.
+    if ts_utc > ahora:
+        return Rechazo("marca de tiempo futura: corrompe el orden de la serie")
+    return None
+
+
+def validar_perfil(
+    anio_nacimiento: int,
+    umbral_hipo: float,
+    umbral_hiper: float,
+    duracion_accion_h: float,
+    tiempo_absorcion_min: int,
+    tipo_insulina_rapida: str | None,
+    ahora: datetime,
+) -> Rechazo | None:
+    """Espejo de `Validacion.validarPerfil` en Swift, **sin nombre, apellidos ni peso**.
+
+    Esos tres no llegan nunca al servidor, y una firma que no los acepta es la regla 3 hecha
+    código: no hay manera de pasárselos por accidente.
+
+    Mismo orden que el Swift, quitando los tres campos: año de nacimiento (no futuro, edad
+    mínima, edad máxima), umbral de hipo, umbral de hiper, largo del tipo de insulina,
+    duración de acción, absorción. La edad sale del año solo, en UTC, igual que
+    `ReglasDePerfil.edad`: no se sabe más de la persona, a propósito.
+    """
+    edad = ahora.astimezone(UTC).year - anio_nacimiento
+    if edad < 0:
+        return Rechazo("año de nacimiento futuro")
+    if edad < EDAD_MINIMA:
+        return Rechazo(f"edad menor que {EDAD_MINIMA} años: el proyecto no tiene consentimiento")
+    if edad > EDAD_MAXIMA:
+        return Rechazo(f"año de nacimiento que da más de {EDAD_MAXIMA} años")
+    bajo, alto = UMBRAL_HIPO_RANGO
+    if not (bajo <= umbral_hipo <= alto):
+        return Rechazo(f"umbral de hipoglucemia fuera del rango {bajo}-{alto} mg/dL")
+    bajo, alto = UMBRAL_HIPER_RANGO
+    if not (bajo <= umbral_hiper <= alto):
+        return Rechazo(f"umbral de hiperglucemia fuera del rango {bajo}-{alto} mg/dL")
+    maximo = TIPO_INSULINA_MAX_CARACTERES
+    if tipo_insulina_rapida is not None and len(tipo_insulina_rapida) > maximo:
+        return Rechazo(f"tipo de insulina de más de {maximo} caracteres")
+    bajo, alto = DIA_RANGO_H
+    if not (bajo <= duracion_accion_h <= alto):
+        return Rechazo(f"duración de acción de la insulina fuera del rango {bajo}-{alto} h")
+    if not (ABSORCION_MIN <= tiempo_absorcion_min <= ABSORCION_MAX):
+        return Rechazo(
+            f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min"
+        )
+    return None
+
+
 def es_atipica_por_tasa(
     mg_dl_previo: float, ts_previo: datetime, mg_dl: float, ts: datetime, origen: Origen
 ) -> bool:
@@ -130,9 +240,14 @@ def cob(carbs_g: float, minutos_desde_comida: float,
     no captura y validación clínica que este proyecto no puede hacer.
 
     Caso de prueba P-11: 60 g con 180 min, a los 90 min → 30 g.
+
+    Con minutos negativos —una comida que todavía no ocurre— devuelve 0 (paso 2, decisión
+    2.3). Antes lanzaba y el Swift devolvía los gramos completos; devolver los gramos era la
+    respuesta más peligrosa porque parece un número razonable. Las validaciones rechazan la
+    hora futura, pero si algo lo esquiva, las tres implementaciones contestan lo mismo.
     """
     if minutos_desde_comida < 0:
-        raise ValueError("el tiempo desde la comida no puede ser negativo")
+        return 0.0
     if minutos_desde_comida >= tiempo_absorcion_min:
         return 0.0
     return carbs_g * (1 - minutos_desde_comida / tiempo_absorcion_min)
