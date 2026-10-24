@@ -28,15 +28,32 @@ rm -f glucy.db && alembic upgrade head    # crea las doce desde cero
 Las marcas de tiempo se guardan en UTC. La zona local de cada registro viaja aparte, en
 `zona_horaria`, porque la hora local es lo que alimenta `hora_sin` y `hora_cos` en la fase 3.
 
+### Las fechas: `FechaUtc`
+
+Las trece columnas de fecha de las doce tablas usan `FechaUtc`, un `TypeDecorator` propio en
+`app/models/tipos.py` (decisión 2.1 del paso 2):
+
+- **Al guardar**, convierte a UTC. Una fecha **sin zona no se guarda**: levanta un error en el
+  código en lugar de suponer UTC, que acertaría casi siempre y desplazaría la serie el resto de
+  las veces sin que nada falle.
+- **Al leer**, devuelve el `datetime` **con `tzinfo` UTC**.
+
+Hace falta porque SQLite devuelve las fechas sin zona aunque la columna sea
+`DateTime(timezone=True)`, y comparar eso con `datetime.now(UTC)` levanta `TypeError`. No
+rompía nada mientras solo se escribía; habría tronado en el primer `GET` del paso 3.
+
+**No lleva migración**: el tipo solo cambia el procesado del lado de Python, y en SQLite el DDL
+sigue siendo `DATETIME`. `alembic check` no detecta diferencias entre `0001` y los modelos.
+
 ### Quién escribe cada tabla
 
 Flujo en un solo sentido por tipo de dato: nunca compiten dos autoridades por el mismo campo.
 
 | Tabla | Autoridad | La escribe | Desde |
 | --- | --- | --- | --- |
-| `usuarios` | teléfono | el primer lote de cada `usuario_uuid` | paso 1 |
+| `usuarios` | teléfono | nace con el primer lote de cada `usuario_uuid`; los seis parámetros clínicos, `POST /perfil` | pasos 1 y 2 |
 | `glucose_readings` | teléfono | `POST /readings` | paso 1 |
-| `cuarentena` | backend | cualquier lote, con lo que no pasó la validación | paso 1 |
+| `cuarentena` | backend | cualquier lote o perfil, con lo que no pasó la validación | paso 1 |
 | `meals` | teléfono | `POST /meals` | paso 2 |
 | `insulin_doses` | teléfono | `POST /insulin` | paso 2 |
 | `context_events` | teléfono | por definir | — |
@@ -47,7 +64,7 @@ Flujo en un solo sentido por tipo de dato: nunca compiten dos autoridades por el
 | `agregados_diarios` | backend | pipeline | paso 4 |
 | `xapi_events` | backend | registro para Learning Locker | por definir |
 
-### Las que usa el paso 1
+### Las que usan los pasos 1 y 2
 
 #### `usuarios`
 
@@ -60,13 +77,18 @@ Flujo en un solo sentido por tipo de dato: nunca compiten dos autoridades por el
 | `umbral_hiper` | real | sí | |
 | `tipo_insulina_rapida` | texto | sí | |
 | `duracion_accion_insulina` | real | sí | horas |
-| `ts_alta` | fecha y hora | no | primer lote recibido |
+| `ts_alta` | fecha y hora | no | primer contacto, por lote o por perfil. No vuelve a cambiar |
 
 **Sin nombre, sin apellidos, sin peso, sin correo.** No es un olvido (regla 3).
 
-La fila nace en el primer lote que llega con ese UUID, con `uuid` y `ts_alta` y todo lo demás
-nulo (decisión 2.7). Los seis parámetros clínicos no tienen todavía por dónde llegar: es la
-contradicción **C-7**, que se resuelve en el paso 2 con una carga reducida del perfil.
+La fila nace en el primer contacto con ese UUID (decisión 2.7 del paso 1). Si es un lote, nace
+con `uuid` y `ts_alta` y todo lo demás nulo. Los seis parámetros clínicos llegan por
+`POST /perfil` (paso 2, **C-7 cerrado**), que es un *upsert*: el segundo envío actualiza los
+seis y no toca `ts_alta`.
+
+`tipo_usuario` admite `tipo1`, `tipo2_insulinodependiente`, `prediabetes` y
+`resistencia_insulina` (C-3). No hay columna ni campo de relación insulina/carbohidratos ni de
+factor de sensibilidad (regla 7).
 
 #### `glucose_readings`
 
@@ -90,7 +112,7 @@ su tabla (decisión 2.2). `atipica` la recalcula el pipeline del paso 4.
 | --- | --- | --- | --- |
 | `id` | entero | no | PK autoincremental |
 | `ts_recepcion` | fecha y hora | no | cuándo llegó el renglón |
-| `tabla_destino` | texto | no | p. ej. `glucose_readings` |
+| `tabla_destino` | texto | no | `glucose_readings`, `meals`, `insulin_doses` o `usuarios` |
 | `carga_original` | JSON | no | el renglón tal como llegó, **solo con las claves que son columnas** |
 | `claves_descartadas` | JSON | no | **añadido, no está en el Documento 3**; ver abajo |
 | `motivo_rechazo` | texto | no | por qué no pasó |
@@ -105,19 +127,60 @@ justo lo que la regla 3 prohíbe. Así que `carga_original` se filtra por los no
 columnas de la tabla destino, y de lo que se descartó solo se guarda **el nombre** de la clave:
 da el diagnóstico («llegó una `nota`, arréglalo en la app») sin guardar el contenido.
 
-### Las otras nueve
+Un perfil rechazado también deja aquí su fila, con `tabla_destino = "usuarios"` y la carga
+filtrada por las columnas de `usuarios`: un `nombre` enviado por error deja el nombre de la
+clave y no su contenido (decisión 2.8 del paso 2).
+
+#### `meals`
+
+| Columna | Tipo | Nula | Nota |
+| --- | --- | --- | --- |
+| `uuid` | UUID | no | PK, llave de idempotencia. La genera el teléfono |
+| `usuario_uuid` | UUID | no | FK a `usuarios.uuid`, con índice. Sale del token |
+| `ts_utc` | fecha y hora | sí\* | en UTC, con índice |
+| `zona_horaria` | texto | sí\* | nombre IANA que se pudo resolver |
+| `carbs_g` | real | sí\* | 0–300. **Gramos totales**, ya multiplicados por las porciones |
+| `tiempo_absorcion_min` | entero | sí\* | 30–300; 180 si el teléfono no lo manda (D-8) |
+| `proteina_g` | real | sí | **siempre nula en la fase 2** |
+| `grasa_g` | real | sí | **siempre nula en la fase 2** |
+| `fibra_g` | real | sí | **siempre nula en la fase 2** |
+| `codigo_barras` | texto | sí | |
+| `porciones` | real | sí\* | mayor que cero; 1 si no se manda. Solo informativo: no se multiplica |
+| `origen` | texto | sí\* | los mismos valores que en `glucose_readings` |
+
+\* La columna admite nulos desde la migración `0001`, pero `POST /meals` siempre la llena:
+el esquema de entrada la exige o le pone su valor por omisión.
+
+`proteina_g`, `grasa_g` y `fibra_g` existen porque el Documento 3 las fija, y la app de la
+fase 1 no las captura (decisión 2.2 del paso 1). Se aceptan igual en la entrada, para que el día
+que la app las capture el servidor no cambie. Que la columna exista y esté nula es distinto de
+no tenerla.
+
+No suben `descripcion`, `nombre_producto`, `porcion_g`, `confirmada_por_usuario`,
+`escrita_en_health_kit` ni `nota`.
+
+#### `insulin_doses`
+
+| Columna | Tipo | Nula | Nota |
+| --- | --- | --- | --- |
+| `uuid` | UUID | no | PK, llave de idempotencia. La genera el teléfono |
+| `usuario_uuid` | UUID | no | FK a `usuarios.uuid`, con índice. Sale del token |
+| `ts_utc` | fecha y hora | sí\* | en UTC, con índice |
+| `zona_horaria` | texto | sí\* | nombre IANA que se pudo resolver |
+| `unidades` | real | sí\* | mayor que 0, a lo más 50, múltiplo de 0.5 |
+| `tipo` | texto | sí\* | `bolo` · `basal` (C-4) |
+| `motivo` | texto | sí | `comida` · `correccion` · `programada`, o nulo si la persona no lo dijo |
+
+\* Igual que en `meals`: nula en el DDL, siempre llena por `POST /insulin`.
+
+Guarda lo que la persona registró. El sistema **jamás calcula ni sugiere una dosis**, y no hay
+columna de relación insulina/carbohidratos ni de factor de sensibilidad.
+
+### Las otras siete
 
 Creadas con las columnas que les da el Documento 3, todas nulas salvo las claves, hasta que su
 paso las llene.
 
-- **`meals`**: `uuid` (PK), `usuario_uuid` (FK), `ts_utc`, `zona_horaria`, `carbs_g`,
-  `tiempo_absorcion_min`, `proteina_g`, `grasa_g`, `fibra_g`, `codigo_barras`, `porciones`,
-  `origen`. **`proteina_g`, `grasa_g` y `fibra_g` siempre son nulas en la fase 2**: la app de la
-  fase 1 no las captura (decisión 2.2). La columna existe porque el Documento 3 la fija, que es
-  distinto de no tenerla.
-- **`insulin_doses`**: `uuid` (PK), `usuario_uuid` (FK), `ts_utc`, `zona_horaria`, `unidades`,
-  `tipo`, `motivo`. Guarda lo que la persona registró; el sistema **jamás calcula ni sugiere una
-  dosis**.
 - **`context_events`**: `uuid` (PK), `usuario_uuid` (FK), `ts_inicio`, `ts_fin`, `clase`,
   `intensidad`, `calidad`, `origen`.
 - **`predictions`**: `uuid` (PK), `usuario_uuid` (FK), `ts_utc`, `horizonte_min`,

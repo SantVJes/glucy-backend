@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.sesion import obtener_sesion
 from app.schemas.lotes import LoteCrudo, RespuestaLote
 from app.seguridad import usuario_del_token
-from app.services.ingesta import ingerir_lecturas
+from app.services.ingesta import LOTE_LECTURAS, ingerir
 
 router = APIRouter(tags=["lotes"])
 
@@ -36,7 +36,7 @@ def subir_lecturas(
     """Responde 200 aunque haya renglones en cuarentena: el lote se procesó, y lo que pasó con
     cada renglón está en las tres listas. Un uuid repetido no es 409, es un duplicado.
     """
-    resultado = ingerir_lecturas(sesion, usuario_uuid, lote.items, datetime.now(UTC))
+    resultado = ingerir(sesion, usuario_uuid, lote.items, datetime.now(UTC), LOTE_LECTURAS)
     return RespuestaLote(
         aceptados=resultado.aceptados,
         duplicados=resultado.duplicados,

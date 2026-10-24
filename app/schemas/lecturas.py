@@ -1,21 +1,11 @@
 """El renglón de `POST /readings`."""
 
-from enum import StrEnum
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
+from app.schemas.enums import ContextoComida
 from referencia.reglas_clinicas import Origen
-
-
-class ContextoComida(StrEnum):
-    """Las mismas cadenas que `ContextoComida` en Swift. No se inventan variantes en inglés."""
-
-    EN_AYUNAS = "en_ayunas"
-    ANTES_DE_COMER = "antes_de_comer"
-    DOS_HORAS_DESPUES = "dos_horas_despues"
-    ANTES_DE_DORMIR = "antes_de_dormir"
-    OTRO = "otro"
 
 
 class LecturaEntrada(BaseModel):

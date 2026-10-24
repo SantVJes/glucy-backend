@@ -27,7 +27,10 @@ from referencia.reglas_clinicas import (
     se_puede_interpolar,
     sensibilidad_hipoglucemia,
     tasa_falsas_alarmas,
+    validar_comida,
+    validar_dosis,
     validar_lectura,
+    validar_perfil,
     zona_clarke,
 )
 
@@ -86,6 +89,14 @@ def test_P11_cob_60g_180min_a_los_90min_son_30g():
 def test_cob_es_cero_pasado_el_tiempo_de_absorcion():
     assert cob(60, 180, 180) == 0.0
     assert cob(60, 400, 180) == 0.0
+
+
+def test_36_cob_con_minutos_negativos_devuelve_cero():
+    """Paso 2, decisión 2.3: antes lanzaba ValueError y el Swift devolvía los gramos completos.
+    Una comida que todavía no ocurre no tiene carbohidratos activos."""
+    assert cob(60, -1, 180) == 0.0
+    assert cob(60, -0.001, 180) == 0.0
+    assert cob_total([(60, -30, 180), (60, 90, 180)]) == pytest.approx(30.0)
 
 
 def test_cob_con_los_presets_de_30_y_300():
@@ -231,3 +242,129 @@ def test_P13_la_plantilla_no_depende_de_nada_externo_y_no_sugiere_dosis():
     assert "confirmar con una medición" in texto
     for prohibido in ("unidades", "UI", "inyect", "toma "):
         assert prohibido not in texto
+
+
+# --- Validación de comidas, dosis y perfil (paso 2, prueba 35) --------------
+# Los dos extremos de cada rango y el primer valor de cada lado que ya no pasa. Los casos con
+# varias fallas a la vez fijan el orden de las comprobaciones, que es el del Swift.
+
+ANTES = AHORA - timedelta(minutes=5)
+FUTURA = AHORA + timedelta(minutes=1)
+
+
+@pytest.mark.parametrize(
+    ("carbs", "absorcion", "porciones", "ts", "fragmento"),
+    [
+        (0, 180, 1, ANTES, None),
+        (300, 180, 1, ANTES, None),
+        (-0.1, 180, 1, ANTES, "0-300 g"),
+        (300.1, 180, 1, ANTES, "0-300 g"),
+        (60, 30, 1, ANTES, None),
+        (60, 300, 1, ANTES, None),
+        (60, 29, 1, ANTES, "30-300 min"),
+        (60, 301, 1, ANTES, "30-300 min"),
+        (60, 180, 0.5, ANTES, None),
+        (60, 180, 0, ANTES, "porciones"),
+        (60, 180, -1, ANTES, "porciones"),
+        (60, 180, 1, AHORA, None),
+        (60, 180, 1, FUTURA, "futura"),
+        # Varias fallas: gana la que el Swift revisa primero.
+        (301, 20, 0, FUTURA, "0-300 g"),
+        (60, 20, 0, FUTURA, "30-300 min"),
+        (60, 180, 0, FUTURA, "porciones"),
+    ],
+)
+def test_35_validar_comida(carbs, absorcion, porciones, ts, fragmento):
+    r = validar_comida(carbs, absorcion, porciones, ts, AHORA)
+    if fragmento is None:
+        assert r is None
+    else:
+        assert r is not None and fragmento in r.motivo
+
+
+@pytest.mark.parametrize(
+    ("unidades", "ts", "fragmento"),
+    [
+        (0.5, ANTES, None),
+        (50, ANTES, None),
+        (2.5, ANTES, None),
+        (0, ANTES, "mayor que cero"),
+        (-1, ANTES, "mayor que cero"),
+        (50.5, ANTES, "0-50 UI"),
+        (2.3, ANTES, "resolución"),
+        (0.1, ANTES, "resolución"),
+        (6, AHORA, None),
+        (6, FUTURA, "futura"),
+        # Varias fallas: gana la que el Swift revisa primero.
+        (0, FUTURA, "mayor que cero"),
+        (50.3, FUTURA, "0-50 UI"),
+        (2.3, FUTURA, "resolución"),
+    ],
+)
+def test_35_validar_dosis(unidades, ts, fragmento):
+    r = validar_dosis(unidades, ts, AHORA)
+    if fragmento is None:
+        assert r is None
+    else:
+        assert r is not None and fragmento in r.motivo
+
+
+PERFIL_VALIDO = {
+    "anio_nacimiento": 2001,
+    "umbral_hipo": 70,
+    "umbral_hiper": 180,
+    "duracion_accion_h": 5,
+    "tiempo_absorcion_min": 180,
+    "tipo_insulina_rapida": "lispro",
+}
+
+
+@pytest.mark.parametrize(
+    ("cambios", "fragmento"),
+    [
+        ({}, None),
+        # AHORA es 2026: 2011 da 15 años y 1906 da 120, los dos extremos.
+        ({"anio_nacimiento": 2011}, None),
+        ({"anio_nacimiento": 1906}, None),
+        ({"anio_nacimiento": 2012}, "menor que 15"),
+        ({"anio_nacimiento": 1905}, "más de 120"),
+        ({"anio_nacimiento": 2027}, "futuro"),
+        ({"umbral_hipo": 50}, None),
+        ({"umbral_hipo": 90}, None),
+        ({"umbral_hipo": 49.9}, "50-90"),
+        ({"umbral_hipo": 90.1}, "50-90"),
+        ({"umbral_hiper": 140}, None),
+        ({"umbral_hiper": 300}, None),
+        ({"umbral_hiper": 139}, "140-300"),
+        ({"umbral_hiper": 301}, "140-300"),
+        ({"duracion_accion_h": 2}, None),
+        ({"duracion_accion_h": 8}, None),
+        ({"duracion_accion_h": 1.9}, "2-8 h"),
+        ({"duracion_accion_h": 9}, "2-8 h"),
+        ({"tiempo_absorcion_min": 30}, None),
+        ({"tiempo_absorcion_min": 300}, None),
+        ({"tiempo_absorcion_min": 29}, "30-300 min"),
+        ({"tiempo_absorcion_min": 301}, "30-300 min"),
+        ({"tipo_insulina_rapida": None}, None),
+        ({"tipo_insulina_rapida": "x" * 40}, None),
+        ({"tipo_insulina_rapida": "x" * 41}, "40 caracteres"),
+        # Varias fallas: gana la que el Swift revisa primero.
+        ({"anio_nacimiento": 2020, "umbral_hipo": 40}, "menor que 15"),
+        ({"umbral_hipo": 40, "umbral_hiper": 320}, "50-90"),
+        ({"tipo_insulina_rapida": "x" * 41, "duracion_accion_h": 9}, "40 caracteres"),
+        ({"duracion_accion_h": 9, "tiempo_absorcion_min": 20}, "2-8 h"),
+    ],
+)
+def test_35_validar_perfil(cambios, fragmento):
+    r = validar_perfil(**{**PERFIL_VALIDO, **cambios}, ahora=AHORA)
+    if fragmento is None:
+        assert r is None
+    else:
+        assert r is not None and fragmento in r.motivo
+
+
+def test_validar_perfil_no_acepta_nombre_apellidos_ni_peso():
+    """Regla 3 hecha firma: no hay manera de pasárselos por accidente."""
+    for campo in ("nombre", "apellidos", "peso_kg"):
+        with pytest.raises(TypeError):
+            validar_perfil(**PERFIL_VALIDO, ahora=AHORA, **{campo: "x"})
