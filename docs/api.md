@@ -1,17 +1,24 @@
 # API
 
-Los siete endpoints con ejemplos de petición y respuesta, errores y límites.
-Sale del punto 14 del reporte y de la OpenAPI que genera FastAPI en `/docs`.
+Los siete endpoints de RF-21 más `POST /perfil`, el octavo, con ejemplos de petición y
+respuesta, errores y límites. Sale del punto 14 del reporte y de la OpenAPI que genera FastAPI
+en `/docs`.
 
 | Endpoint | Método | Para qué | Estado |
 | --- | --- | --- | --- |
 | `/readings` | POST | lote de lecturas de glucosa | **fase 2, paso 1** |
-| `/meals` | POST | lote de comidas | paso 2 |
-| `/insulin` | POST | lote de dosis | paso 2 |
+| `/meals` | POST | lote de comidas | **fase 2, paso 2** |
+| `/insulin` | POST | lote de dosis | **fase 2, paso 2** |
+| `/perfil` | POST | los seis parámetros clínicos del perfil (el octavo, C-7) | **fase 2, paso 2** |
 | `/predict` | GET | predicción a 30 y 60 min y con qué modo respondió | paso 5 |
 | `/explain` | POST | explicación en lenguaje natural | paso 6 |
 | `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | paso 3 |
 | `/history` | GET | histórico para el panel y la exportación | paso 3 |
+
+**Son ocho, no siete, y es a propósito.** Los parámetros clínicos del perfil —los umbrales y la
+duración de acción de la insulina, que el pipeline necesita para el IOB y para derivar la
+alerta— no tenían por dónde llegar (C-7). Van en su propio endpoint, con solo esos seis campos,
+en lugar de esconderse en `/readings`.
 
 Además, `GET /salud`, que no es uno de los siete: es para el `healthcheck` del
 `docker-compose.yml` del paso 4, devuelve `{"estado": "ok", "version": "…"}` y no toca la base
@@ -27,7 +34,8 @@ punto 14 de la rúbrica (RF-21).
 ### El contrato es snake_case, igual que las columnas
 
 El campo en el JSON, la columna en la base y el atributo del modelo se llaman igual
-(decisión 2.1): `uuid`, `mg_dl`, `ts_utc`, `zona_horaria`, `contexto_comida`, `origen`. Del lado
+(decisión 2.1 del paso 1): `uuid`, `mg_dl`, `ts_utc`, `zona_horaria`, `contexto_comida`,
+`origen`, `carbs_g`, `tiempo_absorcion_min`, `codigo_barras`, `unidades`. Del lado
 de iOS sale con `JSONEncoder.KeyEncodingStrategy.convertToSnakeCase`, con **una excepción**:
 `LecturaGlucosaDato.contexto` en Swift tiene que llevar la clave explícita `contexto_comida`, o
 el servidor lo manda a cuarentena por campo no permitido.
@@ -61,6 +69,10 @@ Ese script no es un endpoint y no se despliega.
 | `400` | el sobre no es usable: sin `items`, no es lista, vacío, más de 500 | no reintenta, marca el lote con el motivo |
 | `401` | falta el token, no se verifica o está vencido | lo renueva y reintenta **una** vez |
 | `5xx` | algo se rompió del lado del servidor | deja el lote en la cola para la siguiente ventana de wifi |
+
+`POST /perfil` cambia en una cosa: contesta **`400` también cuando el objeto no pasa las
+reglas**, no solo cuando el cuerpo está roto, porque no hay más renglones que salvar. Ver su
+apartado.
 
 **El `409` no se usa en los lotes.** Un uuid repetido no es un conflicto: es un duplicado y
 sale en su lista con un `200`. El `409` se reserva para un conflicto de verdad, si algún día el
@@ -179,3 +191,178 @@ curl -s -X POST http://127.0.0.1:8000/readings \
 
 La primera vez contesta `aceptados`; la segunda, el mismo comando, `duplicados`, sin crear una
 segunda fila.
+
+---
+
+## `POST /meals`
+
+Sube un lote de comidas a `meals`. Mismo sobre, mismas tres listas y mismos códigos que
+`/readings`; el reparto es la misma función (`ingerir`) con otro descriptor de lote.
+
+### Petición
+
+```http
+POST /meals
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{ "items": [
+    { "uuid": "…", "ts_utc": "2026-10-24T13:10:00Z",
+      "zona_horaria": "America/Monterrey", "carbs_g": 60,
+      "tiempo_absorcion_min": 180, "porciones": 1,
+      "codigo_barras": "7501055300014", "origen": "barcode" }
+] }
+```
+
+| Campo | Tipo | Obligatorio | Regla |
+| --- | --- | --- | --- |
+| `uuid` | UUID | sí | lo genera el teléfono; llave de idempotencia |
+| `ts_utc` | ISO 8601 | sí | con offset y no futura |
+| `zona_horaria` | texto | sí | nombre IANA que se pueda resolver |
+| `carbs_g` | número | sí | 0–300 g, ambos inclusive. **Gramos totales, ya multiplicados por las porciones** |
+| `origen` | enum | sí | los mismos seis de `/readings`; en la práctica `manual`, `barcode` u `ocr_etiqueta` |
+| `tiempo_absorcion_min` | entero | no | 30–300; si falta, **180** (D-8) |
+| `porciones` | número | no | mayor que cero; si falta, **1**. Solo informativo |
+| `codigo_barras` | texto | no | |
+| `proteina_g`, `grasa_g`, `fibra_g` | número | no | se aceptan, pero **en la fase 2 siempre llegan nulas**: la app no las captura |
+
+**`carbs_g` ya es el total.** En la app, `Carbohidratos` lo calcula como
+`carbsPor100g / 100 × porcionG × porciones`, y `porciones` viaja aparte solo como información.
+Si el servidor volviera a multiplicar, el COB del pipeline saldría al doble o al triple.
+
+`descripcion`, `nombre_producto`, `porcion_g`, `confirmada_por_usuario`,
+`escrita_en_health_kit` y `nota` **no suben**: mandan el renglón a cuarentena y de ellos solo
+queda el nombre de la clave en `claves_descartadas`.
+
+### Qué va a cuarentena, y en qué orden
+
+Los mismos pasos que `/readings` (esquema, `usuario_uuid` ajeno, zona horaria) y después
+`validar_comida` de la referencia, que comprueba en el orden del Swift:
+
+1. `carbs_g` fuera de 0–300 g.
+2. `tiempo_absorcion_min` fuera de 30–300 min.
+3. `porciones` no mayor que cero.
+4. Marca de tiempo futura.
+
+---
+
+## `POST /insulin`
+
+Sube un lote de dosis a `insulin_doses`. Son dosis que la persona **dice haberse aplicado**: se
+registran y nunca se calcula ni se sugiere una (regla 7, RF-14).
+
+### Petición
+
+```http
+POST /insulin
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{ "items": [
+    { "uuid": "…", "ts_utc": "2026-10-24T13:12:00Z",
+      "zona_horaria": "America/Monterrey", "unidades": 6.5,
+      "tipo": "bolo", "motivo": "comida" }
+] }
+```
+
+| Campo | Tipo | Obligatorio | Regla |
+| --- | --- | --- | --- |
+| `uuid` | UUID | sí | lo genera el teléfono; llave de idempotencia |
+| `ts_utc` | ISO 8601 | sí | con offset y no futura |
+| `zona_horaria` | texto | sí | nombre IANA que se pueda resolver |
+| `unidades` | número | sí | mayor que 0, a lo más 50 UI, múltiplo de 0.5 |
+| `tipo` | enum | sí | `bolo` · `basal`. Nunca «rápida»: es una etiqueta de la interfaz (C-4) |
+| `motivo` | enum | no | `comida` · `correccion` · `programada`. Nulo si la persona no lo dijo; no se adivina |
+
+**No existe ningún campo de relación insulina/carbohidratos ni de factor de sensibilidad**, ni
+aquí ni en ningún otro endpoint (regla 7, C-2). Si llegara uno, el renglón va a cuarentena.
+
+### Qué va a cuarentena, y en qué orden
+
+Los mismos pasos que `/readings` y después `validar_dosis` de la referencia, en el orden del
+Swift:
+
+1. `unidades` no mayor que cero: cero no es una dosis, es un campo sin llenar.
+2. `unidades` por encima de 50 UI.
+3. `unidades` que no son múltiplo de 0.5, la resolución de la pluma (2.3 no pasa, 2.5 sí).
+4. Marca de tiempo futura.
+
+Se valida que la dosis sea **anotable**, no que sea la adecuada: eso sería dosificar.
+
+---
+
+## `POST /perfil`
+
+El octavo endpoint. Guarda en `usuarios` los seis parámetros clínicos que el pipeline necesita.
+**No es un lote**: es un solo objeto, y es un *upsert*.
+
+### Petición
+
+```http
+POST /perfil
+Authorization: Bearer <jwt>
+Content-Type: application/json
+
+{ "tipo_usuario": "tipo1", "anio_nacimiento": 2001, "umbral_hipo": 70,
+  "umbral_hiper": 180, "tipo_insulina_rapida": "lispro",
+  "duracion_accion_insulina": 5 }
+```
+
+| Campo | Tipo | Obligatorio | Regla |
+| --- | --- | --- | --- |
+| `tipo_usuario` | enum | sí | `tipo1` · `tipo2_insulinodependiente` · `prediabetes` · `resistencia_insulina` (los cuatro, C-3) |
+| `anio_nacimiento` | entero | sí | el año solo; da una edad de 15 a 120 años |
+| `umbral_hipo` | número | sí | 50–90 mg/dL |
+| `umbral_hiper` | número | sí | 140–300 mg/dL |
+| `tipo_insulina_rapida` | texto | no | a lo más 40 caracteres; nulo en quien no se aplica insulina |
+| `duracion_accion_insulina` | número | sí | 2–8 h |
+
+**Lo interesante es lo que no acepta.** `nombre`, `apellidos`, `peso_kg`, `nota` o cualquier
+otro campo son un `400` con un motivo legible, no un campo que se ignora en silencio
+(`extra="forbid"`). La regla 3 deja de depender de que la app se porte bien.
+
+La validación es `validar_perfil` de la referencia, en el orden del Swift: año de nacimiento
+(no futuro, edad mínima, edad máxima), umbral de hipo, umbral de hiper, largo del tipo de
+insulina, duración de acción. La firma de `validar_perfil` no tiene parámetros para nombre,
+apellidos ni peso.
+
+### Respuesta
+
+`200` con los seis valores **tal como quedaron guardados**, leídos de la base, para que el
+teléfono confirme contra lo que mandó y no contra lo que creía haber mandado:
+
+```json
+{"tipo_usuario":"tipo1","anio_nacimiento":2001,"umbral_hipo":70.0,"umbral_hiper":180.0,
+ "tipo_insulina_rapida":"lispro","duracion_accion_insulina":5.0}
+```
+
+El segundo envío **actualiza**, no duplica ni contesta `duplicados`: el teléfono es la
+autoridad sobre su perfil. `ts_alta` no cambia nunca, tampoco si el usuario nació antes en un
+lote.
+
+### Cuando no pasa: `400` y cuarentena
+
+```json
+400 {"detail": "nombre: no se acepta en el perfil: lo que identifica a la persona no sube (regla 3)"}
+400 {"detail": "umbral de hipoglucemia fuera del rango 50-90 mg/dL"}
+```
+
+En un lote, un renglón malo va a cuarentena y los demás se aceptan, así que `200` es lo
+correcto. Aquí **no hay «los demás»**: si el único objeto no pasa, no se guardó nada, y el
+teléfono tiene que saber que no reintente igual. Por eso `400`.
+
+Y además queda una fila en `cuarentena` con `tabla_destino = "usuarios"`, porque un `400` solo
+vive en el teléfono y RF-22 dice que nada se descarta en silencio. La carga se filtra por las
+columnas de `usuarios`: un `nombre` que llegue por error deja **el nombre de la clave** en
+`claves_descartadas` y su contenido en ninguna parte de la base.
+
+### Prueba a mano
+
+```bash
+TOKEN=$(python scripts/token-de-prueba.py 11111111-1111-1111-1111-111111111111)
+curl -s -X POST localhost:8000/perfil -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"tipo_usuario":"tipo1","anio_nacimiento":2001,"umbral_hipo":70,"umbral_hiper":180,
+       "tipo_insulina_rapida":"lispro","duracion_accion_insulina":5}'
+# con "nombre":"…" en el cuerpo, el mismo comando contesta 400
+```

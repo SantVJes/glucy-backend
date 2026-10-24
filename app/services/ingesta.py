@@ -200,12 +200,17 @@ def _validar_renglon(
     return entrada
 
 
-def motivo_de_validacion(error: ValidationError) -> str:
-    """Un motivo legible por campo, sin repetir el valor recibido."""
+def motivo_de_validacion(error: ValidationError, propios: dict[str, str] | None = None) -> str:
+    """Un motivo legible por campo, sin repetir el valor recibido.
+
+    `propios` cambia el texto de algunos tipos de error para un caso concreto: el perfil lo
+    usa para que un campo de más diga que es la regla 3.
+    """
+    motivos = {**_MOTIVOS_POR_TIPO_DE_ERROR, **(propios or {})}
     partes = []
     for detalle in error.errors():
         campo = ".".join(str(parte) for parte in detalle["loc"]) or "renglón"
-        partes.append(f"{campo}: {_MOTIVOS_POR_TIPO_DE_ERROR.get(detalle['type'], detalle['msg'])}")
+        partes.append(f"{campo}: {motivos.get(detalle['type'], detalle['msg'])}")
     return "; ".join(partes)
 
 

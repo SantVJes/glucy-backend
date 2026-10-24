@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import ajustes
-from app.routers import insulin, meals, readings
+from app.routers import insulin, meals, perfil, readings
 
 VERSION = "0.1.0"
 
@@ -53,3 +53,4 @@ def salud() -> dict[str, str]:
 app.include_router(readings.router)
 app.include_router(meals.router)
 app.include_router(insulin.router)
+app.include_router(perfil.router)
