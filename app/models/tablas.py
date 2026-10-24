@@ -11,13 +11,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey
+from sqlalchemy import JSON, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.models.tipos import FechaUtc
 
 
 class Base(DeclarativeBase):
-    # Todas las marcas de tiempo se guardan con su zona: el servidor trabaja en UTC.
-    type_annotation_map = {datetime: DateTime(timezone=True)}
+    # Todas las marcas de tiempo se guardan en UTC y vuelven con su zona (decisión 2.1 del
+    # paso 2). Cada columna lo declara explícito; el mapa es la red para la que se olvide.
+    type_annotation_map = {datetime: FechaUtc}
 
 
 # ---------------------------------------------------------------------------
@@ -40,7 +43,7 @@ class Usuario(Base):
     umbral_hiper: Mapped[float | None]
     tipo_insulina_rapida: Mapped[str | None]
     duracion_accion_insulina: Mapped[float | None]
-    ts_alta: Mapped[datetime]
+    ts_alta: Mapped[datetime] = mapped_column(FechaUtc)
     # Sin nombre, sin apellidos, sin peso, sin correo. No es un olvido (regla 3).
 
 
@@ -51,7 +54,7 @@ class LecturaGlucosa(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)  # UNIQUE por ser PK (RF-36c)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_utc: Mapped[datetime] = mapped_column(index=True)
+    ts_utc: Mapped[datetime] = mapped_column(FechaUtc, index=True)
     zona_horaria: Mapped[str]
     mg_dl: Mapped[float]
     contexto_comida: Mapped[str | None]
@@ -69,7 +72,7 @@ class Cuarentena(Base):
     __tablename__ = "cuarentena"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    ts_recepcion: Mapped[datetime]
+    ts_recepcion: Mapped[datetime] = mapped_column(FechaUtc)
     tabla_destino: Mapped[str]
     carga_original: Mapped[dict[str, Any]] = mapped_column(JSON)
     claves_descartadas: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -90,7 +93,7 @@ class Comida(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_utc: Mapped[datetime | None] = mapped_column(index=True)
+    ts_utc: Mapped[datetime | None] = mapped_column(FechaUtc, index=True)
     zona_horaria: Mapped[str | None]
     carbs_g: Mapped[float | None]
     tiempo_absorcion_min: Mapped[int | None]
@@ -109,7 +112,7 @@ class DosisInsulina(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_utc: Mapped[datetime | None] = mapped_column(index=True)
+    ts_utc: Mapped[datetime | None] = mapped_column(FechaUtc, index=True)
     zona_horaria: Mapped[str | None]
     unidades: Mapped[float | None]
     tipo: Mapped[str | None]
@@ -121,8 +124,8 @@ class EventoContexto(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_inicio: Mapped[datetime | None] = mapped_column(index=True)
-    ts_fin: Mapped[datetime | None]
+    ts_inicio: Mapped[datetime | None] = mapped_column(FechaUtc, index=True)
+    ts_fin: Mapped[datetime | None] = mapped_column(FechaUtc)
     clase: Mapped[str | None]
     intensidad: Mapped[str | None]
     calidad: Mapped[str | None]
@@ -136,7 +139,7 @@ class Prediccion(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_utc: Mapped[datetime | None] = mapped_column(index=True)
+    ts_utc: Mapped[datetime | None] = mapped_column(FechaUtc, index=True)
     horizonte_min: Mapped[int | None]
     valor_predicho: Mapped[float | None]
     modo: Mapped[str | None]
@@ -150,9 +153,9 @@ class Alerta(Base):
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
     prediccion_uuid: Mapped[UUID | None] = mapped_column(ForeignKey("predictions.uuid"))
-    ts_emision: Mapped[datetime | None]
+    ts_emision: Mapped[datetime | None] = mapped_column(FechaUtc)
     tipo: Mapped[str | None]
-    ts_respuesta: Mapped[datetime | None]
+    ts_respuesta: Mapped[datetime | None] = mapped_column(FechaUtc)
     accion: Mapped[str | None]
     resulto_real: Mapped[bool | None]
 
@@ -163,7 +166,7 @@ class Modelo(Base):
     version: Mapped[str] = mapped_column(primary_key=True)
     algoritmo: Mapped[str | None]
     horizonte: Mapped[int | None]
-    fecha_entrenamiento: Mapped[datetime | None]
+    fecha_entrenamiento: Mapped[datetime | None] = mapped_column(FechaUtc)
     rmse: Mapped[float | None]
     mae: Mapped[float | None]
     mard: Mapped[float | None]
@@ -179,7 +182,7 @@ class _ColumnasAgregado:
     """
 
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), primary_key=True)
-    periodo: Mapped[datetime] = mapped_column(primary_key=True)
+    periodo: Mapped[datetime] = mapped_column(FechaUtc, primary_key=True)
     promedio: Mapped[float | None]
     minimo: Mapped[float | None]
     maximo: Mapped[float | None]
@@ -203,7 +206,7 @@ class EventoXapi(Base):
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
-    ts_utc: Mapped[datetime | None]
+    ts_utc: Mapped[datetime | None] = mapped_column(FechaUtc)
     actor: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     verbo: Mapped[str | None]
     objeto: Mapped[dict[str, Any] | None] = mapped_column(JSON)

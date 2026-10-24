@@ -5,7 +5,7 @@ señal, construir características, COB e IOB son del pipeline del paso 4.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -159,11 +159,12 @@ def _uuid_legible(renglon: dict[str, Any]) -> UUID | None:
 
 
 def _fila(lectura: LecturaEntrada, usuario_uuid: UUID) -> dict[str, Any]:
-    """La fila de `glucose_readings`, con la marca de tiempo llevada a UTC."""
+    """La fila de `glucose_readings`. La marca de tiempo se lleva a UTC en la columna
+    (`FechaUtc`), no aquí: en dos sitios acabaría divergiendo."""
     return {
         "uuid": lectura.uuid,
         "usuario_uuid": usuario_uuid,
-        "ts_utc": lectura.ts_utc.astimezone(UTC),
+        "ts_utc": lectura.ts_utc,
         "zona_horaria": lectura.zona_horaria,
         "mg_dl": lectura.mg_dl,
         "contexto_comida": lectura.contexto_comida,
