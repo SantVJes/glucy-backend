@@ -55,6 +55,11 @@ EDAD_MAXIMA = 120
 TIPO_INSULINA_MAX_CARACTERES = 40
 TIMEOUT_MODELO_LENGUAJE_S = 10
 
+# Cuándo una cifra del periodo significa algo (RF-16). Los mismos valores que
+# ConfiguracionDominio.diasMinimosIndicadores y .diasMinimosGmi en Swift.
+DIAS_MINIMOS_INDICADORES = 3
+DIAS_MINIMOS_GMI = 14
+
 
 class Origen(StrEnum):
     SENSOR = "sensor"
@@ -313,6 +318,23 @@ class Indicadores:
     gmi: float
 
 
+def hay_suficientes_dias(dias_con_lecturas: int) -> bool:
+    """Con menos de tres días distintos, un tiempo en rango describe un día suelto.
+
+    Quien consulta tiene que decir que faltan datos, no mostrar un cero (RF-16). La puerta
+    vive aquí y no en el servidor para que el teléfono, el backend y el entrenamiento la
+    tengan en el mismo sitio.
+    """
+    return dias_con_lecturas >= DIAS_MINIMOS_INDICADORES
+
+
+def gmi_es_fiable(dias_con_lecturas: int) -> bool:
+    """El GMI estima la hemoglobina glucosilada, que resume semanas. Con seis pinchazos sale
+    igual de bonito y no significa nada. La fórmula se validó sobre series de al menos 14
+    días."""
+    return dias_con_lecturas >= DIAS_MINIMOS_GMI
+
+
 def indicadores(valores: list[float], umbral_hipo: int = UMBRAL_HIPO_DEFECTO,
                 umbral_hiper: int = UMBRAL_HIPER_DEFECTO) -> Indicadores:
     """TIR, TBR, TAR, promedio, desviación, CV y GMI.
@@ -321,8 +343,11 @@ def indicadores(valores: list[float], umbral_hipo: int = UMBRAL_HIPO_DEFECTO,
     El TIR se calcula sobre el rango objetivo 70-180; el TBR y el TAR sobre los umbrales
     del perfil, que la persona puede cambiar.
 
-    La pantalla de historial dice **sobre cuántas lecturas** se calculó, y no calcula nada
-    con menos de tres días de datos: una cifra sobre cuatro lecturas engaña.
+    Calcula con cualquier lista no vacía: **esta función no decide si la cifra se enseña.**
+    Esa puerta vive en `hay_suficientes_dias` (tres días distintos con lecturas) y en
+    `gmi_es_fiable` (catorce días para el GMI), y la aplica quien consulta antes de llamar
+    aquí, porque los días no se pueden contar con una lista de valores sin fecha. La pantalla
+    dice **sobre cuántas lecturas** se calculó: una cifra sobre cuatro lecturas engaña.
     """
     if not valores:
         raise ValueError(

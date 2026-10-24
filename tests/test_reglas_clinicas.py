@@ -18,6 +18,8 @@ from referencia.reglas_clinicas import (
     debe_sincronizar,
     es_atipica_por_tasa,
     fraccion_insulina_activa,
+    gmi_es_fiable,
+    hay_suficientes_dias,
     indicadores,
     iob,
     modo_actual,
@@ -368,3 +370,22 @@ def test_validar_perfil_no_acepta_nombre_apellidos_ni_peso():
     for campo in ("nombre", "apellidos", "peso_kg"):
         with pytest.raises(TypeError):
             validar_perfil(**PERFIL_VALIDO, ahora=AHORA, **{campo: "x"})
+
+
+# --- Cuándo se enseña cada cifra (paso 3, prueba 54) ------------------------
+# Los límites exactos, no valores cómodos.
+
+
+@pytest.mark.parametrize(("dias", "esperado"), [(2, False), (3, True), (4, True)])
+def test_54_hay_suficientes_dias_desde_tres(dias, esperado):
+    assert hay_suficientes_dias(dias) is esperado
+
+
+@pytest.mark.parametrize(("dias", "esperado"), [(13, False), (14, True), (15, True)])
+def test_54_gmi_es_fiable_desde_catorce(dias, esperado):
+    assert gmi_es_fiable(dias) is esperado
+
+
+def test_indicadores_no_cambia_de_firma_y_sigue_calculando_con_un_dia():
+    """La puerta es aditiva: `indicadores` calcula igual que antes y no decide nada."""
+    assert indicadores([100, 120]).n == 2
