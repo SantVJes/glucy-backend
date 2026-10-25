@@ -8,3 +8,5 @@ alembic>=1.13
 # Verificación del JWT (HS256). Se usa una biblioteca probada en lugar de escribir la
 # comprobación de la firma a mano: un error ahí deja la puerta abierta sin que falle nada.
 pyjwt>=2.8
+# El pipeline (paso 4): el filtro Savitzky-Golay y el vector de características.
+numpy>=2.0
