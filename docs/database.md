@@ -10,20 +10,39 @@ este servidor es una copia para analítica y para el modelo, nunca la fuente.
 
 ## Grupo B, en el backend
 
-Doce tablas, creadas todas en la migración `0001` de Alembic aunque el paso 1 solo escriba en
-tres (decisión 2.4). Los nombres están fijados en el Documento 3 y **no se traducen ni se
-renombran**, aunque estén en dos idiomas.
+Trece tablas. Las doce del Documento 3 se crean todas en la migración `0001` de Alembic aunque
+el paso 1 solo escribiera en tres (decisión 2.4 del paso 1). La trece, `serie_limpia`, no está
+en el Documento 3 y llega con la `0002` en el paso 4 (**C-9**, ver abajo). Los nombres de las
+doce están fijados en el Documento 3 y **no se traducen ni se renombran**, aunque estén en dos
+idiomas.
 
 ### Motor
 
-**SQLite** para arrancar (D-4), en el archivo `glucy.db`. PostgreSQL 16 con TimescaleDB llega
-en el paso 4, cuando haya volumen y pipeline que justifiquen las series de tiempo. Hasta
-entonces nada fuera de `app/repositories/` supone extensiones de Timescale, y lo específico de
-SQLite (`ON CONFLICT DO NOTHING` con `RETURNING`) vive solo ahí.
+**Dos motores, el mismo código** (D-4, decisión 2.1 del paso 4). **SQLite** para desarrollo y
+para las pruebas, en el archivo `glucy.db`; **PostgreSQL 16 con TimescaleDB** en
+`docker-compose.yml`. El motor lo decide `GLUCY_DATABASE_URL` y nada más: no hay una sola rama
+por motor en el código de aplicación.
+
+Lo único que cambia entre los dos es el `insert` con `ON CONFLICT`, que no es SQL estándar y que
+SQLAlchemy solo expone por dialecto. Se elige en `app/repositories/upsert.py`, y nada fuera de
+`app/repositories/` y de las migraciones sabe en qué motor está.
 
 ```bash
-rm -f glucy.db && alembic upgrade head    # crea las doce desde cero
+rm -f glucy.db && alembic upgrade head    # crea las trece desde cero
 ```
+
+#### TimescaleDB: solo la edición libre, y una sola hipertabla
+
+La imagen es la `-oss`, la edición **Apache 2**. Trae hipertablas y `time_bucket`; **no** trae
+*continuous aggregates*, compresión, políticas de retención ni `time_bucket_gapfill`, que son de
+la edición Community y no son software libre. El proyecto no usa ninguno de ellos.
+
+**La única hipertabla es `serie_limpia`**, con trozos de siete días, y se crea en la `0002` solo
+si el motor es PostgreSQL. **`glucose_readings` no es hipertabla y no puede serlo**: TimescaleDB
+exige que todo índice único de una hipertabla incluya la columna de tiempo, y la llave de
+`glucose_readings` es el `uuid` solo, la llave de idempotencia de todo el sistema. Cambiarla a
+`(uuid, ts_utc)` dejaría entrar el mismo `uuid` dos veces con marcas distintas (decisión 2.4 del
+paso 4).
 
 Las marcas de tiempo se guardan en UTC. La zona local de cada registro viaja aparte, en
 `zona_horaria`, porque la hora local es lo que alimenta `hora_sin` y `hora_cos` en la fase 3.
@@ -60,8 +79,9 @@ Flujo en un solo sentido por tipo de dato: nunca compiten dos autoridades por el
 | `predictions` | backend | servicio de predicción | paso 5 |
 | `alerts` | backend | derivadas de las predicciones | paso 5 |
 | `modelos` | backend | el artefacto que deja `glucy-ml` | paso 5 |
-| `agregados_horarios` | backend | pipeline | paso 4 |
-| `agregados_diarios` | backend | pipeline | paso 4 |
+| `agregados_horarios` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
+| `agregados_diarios` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
+| `serie_limpia` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
 | `xapi_events` | backend | registro para Learning Locker | por definir |
 
 ### Las que usan los pasos 1 y 2
@@ -190,10 +210,39 @@ paso las llene.
 - **`modelos`**: `version` (PK), `algoritmo`, `horizonte`, `fecha_entrenamiento`, `rmse`, `mae`,
   `mard`, `clarke_ab`, `ruta_artefacto`.
 - **`agregados_horarios`** y **`agregados_diarios`**: `usuario_uuid` y `periodo` (PK compuesta),
-  `promedio`, `minimo`, `maximo`, `desviacion`, `tir`, `tbr`, `tar`, `gmi`. Sobre SQLite son
-  tablas normales y vacías; en el paso 4 pasan a *continuous aggregates* de TimescaleDB.
+  `promedio`, `minimo`, `maximo`, `desviacion`, `tir`, `tbr`, `tar`, `gmi`. Son tablas normales
+  en los dos motores y las llena el pipeline con `indicadores()` de la referencia. **No son
+  *continuous aggregates***: no existen en la edición libre, y calcularían el TIR y el GMI en
+  SQL, una cuarta implementación de las reglas clínicas sin nada que la compare contra la
+  referencia (decisión 2.6 del paso 4). Detalle en `docs/pipeline.md`.
 - **`xapi_events`**: `uuid` (PK), `usuario_uuid` (FK), `ts_utc`, `actor`, `verbo`, `objeto`,
   `resultado` (los tres últimos en JSON, como los define xAPI 1.0.3).
+
+### La tabla trece: `serie_limpia` (C-9)
+
+**No está en el Documento 3, y hay que decirlo en el reporte.** El pipeline limpia la señal del
+sensor (RF-23) y no tenía dónde dejarla: `glucose_readings` no tiene columna `atipica` —el paso 1
+decidió no subirla porque el pipeline la recalcula— y escribir encima de `mg_dl` perdería el dato
+crudo, que es del teléfono (regla 1).
+
+| Columna | Tipo | Nula | Nota |
+| --- | --- | --- | --- |
+| `usuario_uuid` | UUID | no | PK compuesta; FK a `usuarios.uuid` |
+| `ts_utc` | fecha y hora | no | PK compuesta; en UTC. Columna de particionado de la hipertabla |
+| `zona_horaria` | texto | no | la de la lectura de origen; las interpoladas toman la de la anterior |
+| `mg_dl` | real | no | suavizado si es de sensor; tal cual si es manual o de foto, o si es atípica |
+| `origen` | texto | no | el de la lectura; `sensor` en las interpoladas |
+| `atipica` | booleano | no | tasa de cambio > 4 mg/dL/min. **Se marca, no se borra** |
+| `interpolada` | booleano | no | rellena un hueco de hasta 15 min; no viene de ninguna lectura |
+
+- **Sin `uuid`**: una fila interpolada no viene de ninguna lectura y no tiene uno. La llave es
+  `(usuario_uuid, ts_utc)`, que incluye la columna de tiempo, y por eso esta sí puede ser
+  hipertabla. Es la única tabla que crece de verdad: 288 filas por día y por persona.
+- **`atipica` e `interpolada` viajan en la fila** porque una métrica sobre datos interpolados no
+  vale lo mismo que una sobre lecturas reales, y quien entrene tiene que poder distinguirlas.
+- **`zona_horaria` no estaba en la lista del documento del paso 4** y se agregó: los agregados
+  diarios agrupan por día local con la zona de cada fila (prueba 76), y la regla 5 obliga a
+  guardar la zona junto al `ts_utc`.
 
 ## Grupo C, lo que nunca sale del teléfono
 

@@ -4,14 +4,16 @@ No necesitan un servidor: compilan las sentencias que arman los repositorios con
 de cada motor. Si una no compila en PostgreSQL, truena aquí y no en el contenedor.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.schema import CreateTable
 
-from app.models.tablas import Comida, DosisInsulina, LecturaGlucosa
+from app.models.tablas import Base, Comida, DosisInsulina, LecturaGlucosa, SerieLimpia
+from app.models.tipos import FechaUtc
 from app.repositories import lotes, perfil, usuarios
 
 DIALECTOS = [
@@ -90,3 +92,41 @@ def test_55_perfil_compila_en_los_dos_motores(dialecto):
     [sql] = sesion.sql
     assert "ON CONFLICT (uuid) DO UPDATE" in sql and "RETURNING" in sql
     assert "ts_alta" not in sql.split("DO UPDATE")[1]  # ts_alta no se toca al actualizar
+
+
+# 56 --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dialecto", DIALECTOS)
+def test_56_las_trece_tablas_compilan_en_los_dos_motores(dialecto):
+    tablas = Base.metadata.sorted_tables
+
+    for tabla in tablas:
+        sql = str(CreateTable(tabla).compile(dialect=dialecto))
+        assert f"CREATE TABLE {tabla.name}" in sql
+
+    assert len(tablas) == 13
+    assert "serie_limpia" in {tabla.name for tabla in tablas}
+
+
+def test_serie_limpia_tiene_la_llave_de_la_hipertabla_y_glucose_readings_la_suya():
+    """La llave de `serie_limpia` incluye el tiempo, que es lo que exige TimescaleDB; la de
+    `glucose_readings` sigue siendo el `uuid` solo, la llave de idempotencia (decisión 2.4)."""
+    assert [c.name for c in SerieLimpia.__table__.primary_key] == ["usuario_uuid", "ts_utc"]
+    assert [c.name for c in LecturaGlucosa.__table__.primary_key] == ["uuid"]
+
+
+# 57 --------------------------------------------------------------------------
+
+
+def test_57_fecha_utc_devuelve_utc_con_zona_tambien_si_el_motor_ya_trae_zona():
+    """En PostgreSQL `TIMESTAMPTZ` vuelve con la zona de la sesión, no necesariamente UTC."""
+    tipo = FechaUtc()
+    en_monterrey = datetime(2026, 10, 23, 22, 0, tzinfo=timezone(timedelta(hours=-6)))
+
+    leida = tipo.process_result_value(en_monterrey, postgresql.dialect())
+
+    assert leida == datetime(2026, 10, 24, 4, 0, tzinfo=UTC)
+    assert leida.utcoffset() == timedelta(0)
+    sin_zona = tipo.process_result_value(datetime(2026, 10, 24, 4, 0), sqlite.dialect())
+    assert sin_zona.tzinfo is not None and sin_zona == leida

@@ -31,7 +31,8 @@ def test_14_alembic_crea_las_doce_tablas_y_uuid_es_unico(tmp_path: Path):
     motor = crear_motor(url)
 
     inspector = inspect(motor)
-    assert set(inspector.get_table_names()) - {"alembic_version"} == DOCE_TABLAS
+    # C-9 (paso 4): la tabla trece, `serie_limpia`, no está en el Documento 3.
+    assert set(inspector.get_table_names()) - {"alembic_version"} == DOCE_TABLAS | {"serie_limpia"}
     assert inspector.get_pk_constraint("glucose_readings")["constrained_columns"] == ["uuid"]
 
     # Y que la base lo haga cumplir, no solo que lo declare.
