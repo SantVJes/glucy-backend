@@ -18,7 +18,7 @@ git checkout -b feature/historial-y-estadisticas
 
 Lo que dejaron los pasos 1 y 2, y se reusa: los cuatro endpoints (`/readings`, `/meals`,
 `/insulin`, `/perfil`), el reparto en tres listas con su descriptor, `FechaUtc`, y las cuatro
-validaciones en `referencia/reglas_clinicas.py`. **80 pruebas en verde.**
+validaciones en `referencia/reglas_clinicas.py`. **152 pruebas en verde.**
 
 ## 1. Qué se construye
 
@@ -389,7 +389,7 @@ si `limite` pasa de 1000 o si una fecha viene sin offset; `401` sin token o con 
 
 ## 7. Las pruebas que tienen que pasar
 
-Las 80 anteriores siguen pasando **sin modificarse**.
+Las 152 anteriores siguen pasando **sin modificarse**.
 
 **Aislamiento** (`tests/test_aislamiento.py`) — las que de verdad importan:
 
@@ -442,7 +442,7 @@ Y `ruff check .` limpio.
 ## 8. Cómo se sabe que el paso 3 está hecho
 
 ```bash
-pytest -q                 # las 80 de antes más las nuevas, ninguna de las 80 modificada
+pytest -q                 # las 152 de antes más las nuevas, ninguna de las 152 modificada
 ruff check .
 git diff --stat develop -- tests/test_readings.py tests/test_esquema.py \
   tests/test_meals.py tests/test_insulin.py tests/test_perfil.py tests/test_fechas.py
