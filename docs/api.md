@@ -12,8 +12,8 @@ en `/docs`.
 | `/perfil` | POST | los seis parámetros clínicos del perfil (el octavo, C-7) | **fase 2, paso 2** |
 | `/predict` | GET | predicción a 30 y 60 min y con qué modo respondió | paso 5 |
 | `/explain` | POST | explicación en lenguaje natural | paso 6 |
-| `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | paso 3 |
-| `/history` | GET | histórico para el panel y la exportación | paso 3 |
+| `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | **fase 2, paso 3** |
+| `/history` | GET | histórico para el panel y la exportación | **fase 2, paso 3** |
 
 **Son ocho, no siete, y es a propósito.** Los parámetros clínicos del perfil —los umbrales y la
 duración de acción de la insulina, que el pipeline necesita para el IOB y para derivar la
@@ -365,4 +365,151 @@ curl -s -X POST localhost:8000/perfil -H "Authorization: Bearer $TOKEN" \
   -d '{"tipo_usuario":"tipo1","anio_nacimiento":2001,"umbral_hipo":70,"umbral_hiper":180,
        "tipo_insulina_rapida":"lispro","duracion_accion_insulina":5}'
 # con "nombre":"…" en el cuerpo, el mismo comando contesta 400
+```
+
+---
+
+## Las consultas: reglas comunes de `GET /history` y `GET /stats`
+
+### Nadie ve la serie de otra persona
+
+Toda consulta se filtra por el `usuario_uuid` **del token**, en el repositorio, como primer
+parámetro obligatorio de cada función (decisión 2.1 del paso 3). **Ningún endpoint de lectura
+acepta un `usuario_uuid`** ni otro parámetro que cambie de quién son los datos: cualquier
+parámetro desconocido, `usuario_uuid` incluido, es un `400`.
+
+### El periodo
+
+| Parámetro | Obligatorio | Regla |
+| --- | --- | --- |
+| `desde` | sí | ISO 8601 **con offset**. Entra en el periodo |
+| `hasta` | sí | ISO 8601 **con offset**. No entra: el periodo es `[desde, hasta)` |
+
+- `desde` tiene que ser anterior a `hasta`, y el periodo no puede pasar de **90 días** (la app
+  pide 7, 14 y 30).
+- Un `hasta` en el futuro se acepta y no devuelve nada de más.
+- En una URL, el `+` de un offset se lee como espacio: usa `Z`, o escribe el `+` como `%2B`.
+
+### Los códigos
+
+| Código | Cuándo |
+| --- | --- |
+| `200` | siempre que la consulta se entendió, **también si no hay ningún dato** |
+| `400` | falta `desde` o `hasta`, una fecha sin offset, `desde >= hasta`, más de 90 días, un `limite` fuera de 1–1000, un `que` o un `cursor` que no se entienden, o un parámetro desconocido |
+| `401` | falta el token, no se verifica o está vencido |
+
+**No hay `404`** (decisión 2.9). Un usuario sin datos, o que no existe, recibe series vacías e
+`indicadores: null`: para quien consulta, «no tengo datos tuyos» y «no existes» son lo mismo, y
+distinguirlas le diría a un tercero con un token válido si un UUID está dado de alta.
+
+**Los `GET` no escriben nada**: no crean el usuario, no tocan `cuarentena` y no leen ni llenan
+las tablas de agregados, que siguen vacías hasta el paso 4.
+
+---
+
+## `GET /stats`
+
+Los indicadores del periodo: TIR, TBR, TAR, promedio, desviación, coeficiente de variación y
+GMI. **Los calcula `indicadores()` de `referencia/reglas_clinicas.py`**; el servidor no calcula
+ninguno por su cuenta.
+
+```http
+GET /stats?desde=2026-10-01T00:00:00Z&hasta=2026-10-24T00:00:00Z
+Authorization: Bearer <jwt>
+```
+
+```json
+{ "desde": "2026-10-01T00:00:00Z", "hasta": "2026-10-24T00:00:00Z",
+  "dias_con_lecturas": 21,
+  "indicadores": { "n": 1843, "promedio": 142.7, "desviacion": 48.2,
+                   "coeficiente_variacion": 33.8, "tir": 68.4, "tbr": 3.1,
+                   "tar": 28.5, "gmi": 6.72 },
+  "umbrales_del_perfil": true, "umbral_hipo": 70.0, "umbral_hiper": 180.0 }
+```
+
+### Cuándo se enseña cada cifra
+
+| Días con lecturas | `indicadores` | `gmi` |
+| --- | --- | --- |
+| menos de 3 | `null`: faltan datos, **no un cero** | — |
+| de 3 a 13 | todos | `null` |
+| 14 o más | todos | el valor |
+
+Las dos puertas son `hay_suficientes_dias` y `gmi_es_fiable` de la referencia, con los mismos
+valores que `ConfiguracionDominio.diasMinimosIndicadores` y `.diasMinimosGmi` en Swift.
+
+**Los días se cuentan por el día local de cada lectura**, con la `zona_horaria` guardada en su
+propia fila, igual que `DiaTipico.diaLocal` en el teléfono. Una lectura de las 19:00 en
+Monterrey es la 01:00 UTC del día siguiente; contada en UTC caería en otro día, y como los días
+deciden si las cifras se enseñan, el teléfono y el panel dirían cosas distintas con la misma
+base. Una zona ilegible se cuenta en UTC, como hace el Swift.
+
+### Los umbrales
+
+El TIR es siempre sobre 70–180. El TBR y el TAR usan los umbrales del perfil
+(`POST /perfil`). Si el perfil no ha llegado se usan los de omisión, 70 y 180, **y se dice**:
+`umbrales_del_perfil: false`. Sin ese campo, un TBR calculado con 70 cuando la persona tiene su
+umbral en 80 se vería idéntico a uno correcto.
+
+---
+
+## `GET /history`
+
+Las lecturas, comidas y dosis del periodo, paginadas por cursor.
+
+```http
+GET /history?desde=2026-10-01T00:00:00Z&hasta=2026-10-24T00:00:00Z&que=lecturas,dosis&limite=200
+Authorization: Bearer <jwt>
+```
+
+| Parámetro | Obligatorio | Regla |
+| --- | --- | --- |
+| `desde`, `hasta` | sí | ver arriba |
+| `que` | no | `lecturas`, `comidas`, `dosis`, o varias separadas por coma. Por omisión, las tres |
+| `limite` | no | renglones por página, contando las tres series: 1–1000, por omisión 200 |
+| `cursor` | no | el `siguiente` de la página anterior, **tal cual** |
+
+```json
+{ "lecturas": [ { "uuid": "…", "ts_utc": "2026-10-23T22:00:00Z",
+                  "zona_horaria": "America/Monterrey", "mg_dl": 112.0,
+                  "origen": "sensor", "contexto_comida": "antes_de_comer" } ],
+  "comidas": [],
+  "dosis": [ { "uuid": "…", "ts_utc": "2026-10-23T22:05:00Z",
+               "zona_horaria": "America/Monterrey", "unidades": 6.5,
+               "tipo": "bolo", "motivo": "comida" } ],
+  "siguiente": "eyJ0cyI6…" }
+```
+
+**Cada renglón tiene exactamente los campos que se aceptaron al subir**, con los mismos
+nombres: los de `POST /readings`, `POST /meals` y `POST /insulin`. Ni `usuario_uuid`, ni nota,
+ni nombre, ni foto: el servidor no los tiene, y un campo de más sería un dato inventado. No
+incluye `cuarentena`: lo rechazado se consulta en el panel del paso 4.
+
+Las fechas salen en ISO 8601 con `Z`, y cada renglón trae su `zona_horaria` original.
+
+Las series que no se piden en `que` vienen vacías y **no se consultan**.
+
+### La paginación
+
+Por **cursor**, no por `offset` (decisión 2.6): mientras alguien pagina el teléfono sigue
+subiendo lotes, y con `offset` eso repite o se salta renglones sin que nadie lo note.
+
+- Las series pedidas se mezclan en un solo orden, `ts_utc` ascendente con `uuid` para
+  desempatar, y `limite` cuenta el total de renglones de la página.
+- `siguiente` es el `(ts_utc, uuid)` del último renglón devuelto, codificado. Es opaco: se
+  manda de vuelta tal cual como `cursor`, con los mismos `desde`, `hasta` y `que`.
+- **`siguiente: null` es el fin.** No lo es «vino menos de `limite`»: con un límite exacto la
+  última página trae `limite` renglones legítimamente.
+- Una lectura que llega a la mitad con una hora anterior al cursor no aparece en las páginas
+  siguientes y no desplaza nada; sale en la próxima consulta desde el principio.
+
+### Prueba a mano: el token B no ve nada de A
+
+```bash
+A=$(python scripts/token-de-prueba.py 11111111-1111-1111-1111-111111111111)
+B=$(python scripts/token-de-prueba.py 22222222-2222-2222-2222-222222222222)
+# sube una lectura con A, y después:
+curl -s "localhost:8000/history?desde=2026-10-01T00:00:00Z&hasta=2026-11-01T00:00:00Z" \
+  -H "Authorization: Bearer $B"
+# {"lecturas":[],"comidas":[],"dosis":[],"siguiente":null}
 ```
