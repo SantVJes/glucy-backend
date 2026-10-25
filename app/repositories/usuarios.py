@@ -3,10 +3,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from app.models.tablas import Usuario
+from app.repositories.upsert import insertar
 
 
 def asegurar_que_existe(sesion: Session, usuario_uuid: UUID, ts_alta: datetime) -> None:
@@ -16,7 +16,7 @@ def asegurar_que_existe(sesion: Session, usuario_uuid: UUID, ts_alta: datetime) 
     vez no deben chocar.
     """
     sesion.execute(
-        insert(Usuario)
+        insertar(sesion, Usuario)
         .values(uuid=usuario_uuid, ts_alta=ts_alta)
         .on_conflict_do_nothing(index_elements=["uuid"])
     )
