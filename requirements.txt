@@ -10,3 +10,5 @@ alembic>=1.13
 pyjwt>=2.8
 # El pipeline (paso 4): el filtro Savitzky-Golay y el vector de características.
 numpy>=2.0
+# El controlador de PostgreSQL (paso 4). SQLite no lo necesita.
+psycopg[binary]>=3.2

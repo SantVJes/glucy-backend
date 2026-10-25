@@ -16,3 +16,6 @@ select = ["E", "F", "I", "UP", "B"]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "postgres: necesitan PostgreSQL con TimescaleDB en GLUCY_DATABASE_URL_POSTGRES; sin ella se saltan",
+]

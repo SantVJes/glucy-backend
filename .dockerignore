@@ -1,0 +1,16 @@
+# Lo que nunca entra a la imagen. El .env lleva la contraseña de la base y el secreto del
+# token: se le pasa al contenedor con env_file, no se copia.
+.env
+.env.*
+!.env.example
+*.db
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+tests
+docs

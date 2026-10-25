@@ -34,3 +34,46 @@ jobs:
           else
             echo "Todavía no hay pruebas en este repositorio."
           fi
+
+  # El mismo código contra PostgreSQL con TimescaleDB (paso 4, decisión 2.1). El trabajo de
+  # arriba, con SQLite, sigue siendo el rápido y no cambia.
+  postgres:
+    name: PostgreSQL con TimescaleDB
+    runs-on: ubuntu-latest
+    services:
+      base:
+        # La misma imagen que docker-compose.yml: la edición Apache 2.
+        image: timescale/timescaledb:2.31.0-pg16-oss
+        env:
+          POSTGRES_DB: glucy
+          # Sin contraseña en el repositorio: la base de la CI es desechable, vive lo que dura
+          # el trabajo y solo se alcanza desde el propio runner. Entra el superusuario por
+          # omisión de la imagen, sin contraseña.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d glucy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GLUCY_DATABASE_URL: postgresql+psycopg://postgres@localhost:5432/glucy
+      GLUCY_DATABASE_URL_POSTGRES: postgresql+psycopg://postgres@localhost:5432/glucy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Migrar PostgreSQL
+        run: alembic upgrade head
+
+      - name: Correr las pruebas marcadas postgres
+        run: pytest -m postgres
