@@ -1,13 +1,12 @@
-"""Inserción idempotente de los tres lotes. Lo específico de SQLite vive aquí y en ningún
-otro sitio."""
+"""Inserción idempotente de los tres lotes. El `insert` de cada motor sale de `upsert.py`."""
 
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from app.models.tablas import Base
+from app.repositories.upsert import insertar
 
 
 def insertar_ignorando_duplicados(
@@ -21,13 +20,12 @@ def insertar_ignorando_duplicados(
     `ON CONFLICT DO NOTHING`, y la lista de los que entraron sale del `RETURNING`.
 
     Sirve para cualquier tabla cuya llave sea `uuid`: `glucose_readings`, `meals` e
-    `insulin_doses`. En el paso 4 el import cambia a `sqlalchemy.dialects.postgresql` y no se
-    toca ninguna otra capa.
+    `insulin_doses`, en SQLite y en PostgreSQL: el dialecto lo elige `upsert.insertar`.
     """
     if not filas:
         return []
     sentencia = (
-        insert(modelo)
+        insertar(sesion, modelo)
         .values(filas)
         .on_conflict_do_nothing(index_elements=["uuid"])
         .returning(modelo.uuid)

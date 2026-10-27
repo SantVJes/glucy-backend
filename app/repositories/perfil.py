@@ -1,13 +1,13 @@
-"""Acceso al perfil clínico en `usuarios`. Lo específico de SQLite vive aquí."""
+"""Acceso al perfil clínico en `usuarios`. El `insert` de cada motor sale de `upsert.py`."""
 
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from app.models.tablas import Usuario
+from app.repositories.upsert import insertar
 
 
 def guardar(
@@ -22,7 +22,7 @@ def guardar(
     la entrada.
     """
     sentencia = (
-        insert(Usuario)
+        insertar(sesion, Usuario)
         .values(uuid=usuario_uuid, ts_alta=ahora, **campos)
         .on_conflict_do_update(index_elements=["uuid"], set_=campos)
         .returning(*(getattr(Usuario, campo) for campo in campos))

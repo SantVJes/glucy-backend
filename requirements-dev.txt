@@ -3,3 +3,6 @@
 pytest>=8.0
 ruff>=0.6
 httpx>=0.27
+# Solo como árbitro del filtro de app/services/pipeline/filtro.py (decisión 2.7 del paso 4).
+# No entra a la imagen de la API.
+scipy>=1.13

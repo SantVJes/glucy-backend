@@ -1,0 +1,38 @@
+# Glucy: la API y PostgreSQL con TimescaleDB (paso 4 de la fase 2).
+#
+#   cp .env.example .env     # y llenar los valores; .env está en .gitignore
+#   docker compose up -d
+#
+# Ningún usuario ni contraseña vive en este archivo: salen del .env.
+
+services:
+  base:
+    # La edición Apache 2: libre de verdad. Trae hipertablas y time_bucket; no trae
+    # continuous aggregates ni compresión, y por eso los agregados los llena el
+    # pipeline (decisión 2.6).
+    image: timescale/timescaledb:2.31.0-pg16-oss
+    environment:
+      POSTGRES_DB: glucy
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Con nombre: sin él, `docker compose down` borra la base y no se nota hasta que
+    # alguien pierde una semana de datos de prueba.
+    volumes: [datos:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d glucy"]
+      interval: 5s
+      retries: 10
+    # Sin `ports`: la base solo se alcanza desde la red interna de compose. Son datos de
+    # salud aunque estén seudonimizados.
+
+  api:
+    build: .
+    env_file: .env
+    # service_healthy y no a secas: sin eso la API arranca antes que la base y
+    # `alembic upgrade head` falla.
+    depends_on:
+      base: {condition: service_healthy}
+    ports: ["8000:8000"]
+
+volumes:
+  datos:

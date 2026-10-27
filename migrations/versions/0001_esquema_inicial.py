@@ -7,8 +7,9 @@ Creada: 2026-10-14
 Aunque el paso 1 solo escribe en `usuarios`, `glucose_readings` y `cuarentena`, las doce se
 crean aquí: una migración por paso son siete oportunidades de que dos no se apliquen en orden.
 
-`agregados_horarios` y `agregados_diarios` son tablas normales sobre SQLite (D-4); en el paso 4
-pasan a *continuous aggregates* de TimescaleDB con su propia migración.
+`agregados_horarios` y `agregados_diarios` son tablas normales, en SQLite y en PostgreSQL, y las
+llena el pipeline. No son *continuous aggregates*: no existen en la edición Apache 2 de
+TimescaleDB (decisión 2.6 del paso 4, que corrige lo que decía aquí).
 
 `cuarentena.claves_descartadas` es la única columna que no está en el Documento 3 (decisión
 2.6): guarda los nombres de las claves que no son columnas, nunca su contenido.

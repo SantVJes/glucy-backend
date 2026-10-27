@@ -177,8 +177,11 @@ class Modelo(Base):
 class _ColumnasAgregado:
     """Las mismas columnas para los dos agregados.
 
-    En PostgreSQL serán *continuous aggregates* de TimescaleDB (paso 4); mientras tanto son
-    tablas normales y vacías (decisión 2.4).
+    Son tablas normales en los dos motores y las llena el pipeline con `indicadores()` de la
+    referencia (decisión 2.6 del paso 4). **No son *continuous aggregates*:** esos son de la
+    edición Community de TimescaleDB, que no es software libre, y no existen en la edición
+    Apache 2 que usa el proyecto. Además calcularían el TIR y el GMI en SQL, una cuarta
+    implementación de las reglas clínicas sin nada que la compare con la referencia.
     """
 
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), primary_key=True)
@@ -211,3 +214,36 @@ class EventoXapi(Base):
     verbo: Mapped[str | None]
     objeto: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     resultado: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+
+# ---------------------------------------------------------------------------
+# La tabla trece (C-9): no está en el Documento 3.
+# ---------------------------------------------------------------------------
+
+
+class SerieLimpia(Base):
+    """La señal ya depurada por el pipeline (RF-23, decisión 2.5 del paso 4).
+
+    No está en el Documento 3 y hay que decirlo en el reporte (C-9). Sin ella el pipeline no
+    tiene dónde dejar lo que limpia, y escribir encima de `glucose_readings.mg_dl` perdería el
+    dato crudo, que es del teléfono (regla 1).
+
+    La llave es `(usuario_uuid, ts_utc)` y no lleva `uuid`: una fila interpolada no viene de
+    ninguna lectura y no tiene uno. Como la llave incluye la columna de tiempo, en PostgreSQL
+    esta sí puede ser hipertabla, y es la única: `glucose_readings` se queda como tabla normal
+    porque su llave de idempotencia es el `uuid` solo (decisión 2.4).
+
+    `atipica` e `interpolada` viajan en la fila porque una métrica sobre datos interpolados no
+    vale lo mismo que una sobre lecturas reales, y quien entrene tiene que poder distinguirlas.
+    `zona_horaria` viaja también, por la regla 5: los agregados agrupan por día local.
+    """
+
+    __tablename__ = "serie_limpia"
+
+    usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), primary_key=True)
+    ts_utc: Mapped[datetime] = mapped_column(FechaUtc, primary_key=True)
+    zona_horaria: Mapped[str]
+    mg_dl: Mapped[float]
+    origen: Mapped[str]
+    atipica: Mapped[bool] = mapped_column(default=False)
+    interpolada: Mapped[bool] = mapped_column(default=False)
