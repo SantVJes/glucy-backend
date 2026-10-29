@@ -25,9 +25,11 @@ from app.repositories import consultas as repo_consultas
 from app.schemas.prediccion import (
     AVISO_SIN_SENSOR,
     ContribucionShap,
+    Factor,
     PrediccionHorizonte,
     RespuestaPredecir,
 )
+from app.services.nombres import legibles
 from app.services.pipeline.caracteristicas import CARACTERISTICAS_DENSAS, como_fila, vector_denso
 from app.services.pipeline.limpieza import limpiar
 from app.services.prediccion.artefacto import Artefacto
@@ -48,6 +50,10 @@ VENTANA_MIN = 180
 VENTANA_CONTEXTO_MIN = 8 * 60
 
 HORIZONTES = (30, 60)
+
+# Cuántas contribuciones se enseñan. Cinco es lo que el reporte promete, lo que cabe en una
+# pantalla y lo que consume el servicio de explicación; una sexta no cambia una decisión.
+FACTORES_QUE_SE_ENSENAN = 5
 
 
 class SinModelo(Exception):
@@ -119,6 +125,12 @@ def predecir(
                 shap=[
                     ContribucionShap(variable=nombre, mg_dl=round(aporte, 1))
                     for nombre, aporte in contribuciones
+                ],
+                # Las cinco que más pesan, con nombre en palabras y ya sumadas: cinco es lo
+                # que cabe en una pantalla y lo que el reporte promete enseñar.
+                factores=[
+                    Factor(nombre=nombre, mg_dl=round(aporte, 1))
+                    for nombre, aporte in legibles(contribuciones)[:FACTORES_QUE_SE_ENSENAN]
                 ],
             )
         )

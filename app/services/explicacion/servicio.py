@@ -26,9 +26,9 @@ from app.repositories import bitacora as repo_bitacora
 from app.repositories import usuarios as repo_usuarios
 from app.schemas.explicacion import ExplicacionEntrada, RespuestaExplicacion
 from app.services.explicacion import ollama
-from app.services.explicacion.nombres import legibles
 from app.services.explicacion.prompt import mensaje_de_usuario
 from app.services.explicacion.validacion import numeros, revisar
+from app.services.nombres import legibles
 from referencia.reglas_clinicas import plantilla_explicacion
 
 registro = logging.getLogger(__name__)

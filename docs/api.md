@@ -564,6 +564,12 @@ rezagos y derivadas, y tres mediciones sueltas no son una serie continua.
         {"variable": "derivada_2", "mg_dl": -0.2},
         {"variable": "hora_cos", "mg_dl": -0.2},
         {"variable": "rezago_5", "mg_dl": 0.0}
+      ],
+      "factores": [
+        {"nombre": "tu glucosa de ahora", "mg_dl": -24.7},
+        {"nombre": "la hora del día", "mg_dl": 0.4},
+        {"nombre": "si el cambio se está acelerando o frenando", "mg_dl": -0.2},
+        {"nombre": "tu glucosa de hace 5 minutos", "mg_dl": 0.0}
       ]
     },
     {
@@ -571,7 +577,8 @@ rezagos y derivadas, y tres mediciones sueltas no son una serie continua.
       "valor_predicho": 100.7,
       "modelo_version": "m2-v0.1.0",
       "alerta": null,
-      "shap": [{"variable": "mg_dl", "mg_dl": -22.0}, "…"]
+      "shap": [{"variable": "mg_dl", "mg_dl": -22.0}, "…"],
+      "factores": [{"nombre": "tu glucosa de ahora", "mg_dl": -22.0}, "…"]
     }
   ],
   "aviso": null
@@ -585,6 +592,27 @@ el artefacto de la fase 3.
 
 Las cinco contribuciones son **TreeSHAP exacto, del propio XGBoost**, ordenadas de mayor a menor
 en valor absoluto, y son exactamente lo que el teléfono le pasa a `POST /explain`.
+
+### `shap` y `factores`: dos listas, dos consumidores
+
+| Lista | Para quién | Qué lleva |
+| --- | --- | --- |
+| `shap` | el pipeline, glucy-ml y `POST /explain` | el nombre de la característica tal cual: `rezago_30`, `hora_sin` |
+| `factores` | **la pantalla de factores de la app** | el nombre en palabras, ya sumado y recortado a cinco |
+
+Son dos y no una por dos motivos:
+
+1. **En la superficie del producto no hay tecnicismos.** Es regla del proyecto, y `rezago_30` en
+   una pantalla la rompe. `/explain` sí necesita el nombre crudo, porque su propio servicio lo
+   traduce antes de armar el prompt.
+2. **`hora_sin` y `hora_cos` son una sola idea** para quien lee —la hora del día— y dos columnas
+   para el modelo. SHAP reparte de forma **aditiva**, así que en `factores` se suman; en `shap`
+   se quedan separadas. Por eso `factores` puede traer menos entradas que `shap`, como en el
+   ejemplo de arriba: cinco contribuciones, cuatro factores.
+
+Que la app no traduzca también es a propósito: un diccionario de nombres de características
+repetido en Swift se queda viejo el día que el pipeline agrega una columna, y nadie se entera
+hasta que alguien lee «rezago_45» en la pantalla.
 
 ### Respuesta en modo sin sensor
 

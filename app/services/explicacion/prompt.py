@@ -7,7 +7,7 @@ producto como una validación.
 """
 
 from app.schemas.explicacion import ExplicacionEntrada
-from app.services.explicacion.nombres import legibles
+from app.services.nombres import legibles
 
 # El sistema es fijo y no se arma con datos: así no hay forma de que un valor del teléfono
 # cambie las reglas. Las prohibiciones son la regla 7 escrita en el único lugar donde el texto

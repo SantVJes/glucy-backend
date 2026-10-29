@@ -476,3 +476,65 @@ def test_113_un_artefacto_de_ohiot1dm_no_avisa_nada(tmp_path: Path, caplog):
         assert cargar(str(tmp_path))[("denso", 30)].origen_datos == "ohiot1dm"
 
     assert caplog.records == []
+
+
+# ---------------------------------------------------------------------------
+# Los factores, que son lo que dibuja la pantalla de la app.
+# ---------------------------------------------------------------------------
+
+
+def test_120_la_respuesta_trae_los_factores_con_nombre_en_palabras(con_modelo: TestClient):
+    """La regla del proyecto es que en la superficie no hay tecnicismos.
+
+    `shap` sigue crudo porque es el contrato con el pipeline y con glucy-ml, y `/explain` lo
+    necesita así. Lo que la pantalla dibuja es `factores`, y ahí `rezago_30` no puede aparecer.
+    """
+    from app.services.pipeline.caracteristicas import CARACTERISTICAS_DENSAS
+
+    _subir_serie(con_modelo, datetime.now(UTC))
+    prediccion = con_modelo.get("/predict", headers=cabeceras()).json()["predicciones"][0]
+
+    assert prediccion["factores"], "la respuesta llegó sin factores"
+    # El modelo de juguete del fixture pone `mg_dl` arriba de todo, así que la frase se puede
+    # fijar: si cambiara el diccionario de nombres, esta prueba lo dice.
+    assert prediccion["factores"][0]["nombre"] == "tu glucosa de ahora"
+    for factor in prediccion["factores"]:
+        assert factor["nombre"] not in CARACTERISTICAS_DENSAS, factor
+        assert "_" not in factor["nombre"], factor
+        assert isinstance(factor["mg_dl"], float | int)
+
+
+def test_121_son_cinco_como_mucho_y_van_de_mayor_a_menor(con_modelo: TestClient):
+    """Cinco es lo que el reporte promete y lo que cabe en una pantalla. El orden importa: la
+    app enseña las primeras, así que si no fueran las que más pesan enseñaría otra cosa."""
+    _subir_serie(con_modelo, datetime.now(UTC))
+    factores = con_modelo.get("/predict", headers=cabeceras()).json()["predicciones"][0]["factores"]
+
+    assert 0 < len(factores) <= 5
+    pesos = [abs(f["mg_dl"]) for f in factores]
+    assert pesos == sorted(pesos, reverse=True)
+
+
+def test_122_la_hora_del_dia_no_sale_dos_veces(con_modelo: TestClient):
+    """`hora_sin` y `hora_cos` son una sola idea para quien lee y dos columnas para el modelo.
+    SHAP es aditivo, así que se suman. Sin esto «la hora del día» aparecía dos veces con dos
+    cifras distintas, que es lo que hace que una explicación deje de creerse."""
+    _subir_serie(con_modelo, datetime.now(UTC))
+    factores = con_modelo.get("/predict", headers=cabeceras()).json()["predicciones"][0]["factores"]
+
+    prediccion = con_modelo.get("/predict", headers=cabeceras()).json()["predicciones"][0]
+    crudas = {c["variable"] for c in prediccion["shap"]}
+    nombres = [f["nombre"] for f in factores]
+
+    assert len(nombres) == len(set(nombres)), nombres
+    assert {"hora_sin", "hora_cos"} <= crudas, "el fixture dejó de ejercitar la suma"
+    assert len(factores) < len(prediccion["shap"]), "las dos mitades de la hora no se sumaron"
+    assert "la hora del día" in nombres
+
+
+def test_123_sin_sensor_no_hay_factores_porque_no_hay_prediccion(con_modelo: TestClient):
+    """RF-10b: no se rellena con algo que parezca una explicación de algo que no se predijo."""
+    _subir_serie(con_modelo, datetime.now(UTC) - timedelta(minutes=40))
+    cuerpo = con_modelo.get("/predict", headers=cabeceras()).json()
+
+    assert cuerpo["predicciones"] == []
