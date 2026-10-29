@@ -1,0 +1,8 @@
+# Dependencias del simulador de la fase 4. **Van aparte de requirements.txt a propósito**: la
+# imagen de la API no tiene por qué cargar con Streamlit, y la integración continua no tiene por
+# qué instalarlo para correr las pruebas, porque todo lo que decide algo vive en
+# `simulador/escenario.py` y se prueba sin interfaz.
+-r ../requirements.txt
+streamlit>=1.40
+altair>=5.4
+pandas>=2.2

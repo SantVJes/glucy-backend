@@ -50,6 +50,8 @@ ruff check .
 | `app/repositories/` | **todo** el acceso a la base de datos |
 | `app/schemas/` | Pydantic: lo que entra y lo que sale |
 | `referencia/` | **las reglas clínicas como especificación ejecutable**, ver abajo |
+| `grafana/` | las consultas del panel de seguimiento y el tablero que se arma con ellas |
+| `simulador/` | el simulador en Streamlit (fase 4): un escenario a mano y lo que el sistema contestaría |
 | `tests/` | pytest con httpx |
 | `docs/` | arquitectura, API, base de datos, modelos, pruebas y privacidad |
 
@@ -63,10 +65,19 @@ entrenamiento: **si el Swift y esto no coinciden, uno de los dos está mal.**
 
 ## Estado
 
-Fase 0 terminada: repositorio con su estructura, su `CLAUDE.md`, su integración continua y su
-documentación base. **La construcción empieza en la fase 1.** El plan completo, con las siete
-fases repartidas hasta finales de noviembre de 2026, está en la base de documentación del
-proyecto.
+| Fase | Qué es | Cómo va |
+| --- | --- | --- |
+| 1 | la app iOS autónoma | terminada, en el repositorio `glucy-ios` |
+| 2 | este backend, con sus siete endpoints y el pipeline | terminada |
+| 3 | predicción en vivo y explicación con SHAP | **esperando los datos de OhioT1DM** |
+| 4 | el simulador en Streamlit | construido, ver [`docs/simulador.md`](docs/simulador.md) |
+| 5 | validación del modo sensor, 48 h continuas | necesita un sensor comercial |
+| 6 | panel de Grafana y Learning Record Store | terminada, ver [`docs/panel.md`](docs/panel.md) |
+| 7 | piloto de usabilidad y documentación final | al final |
+
+Las fases 4 y 6 se construyeron antes que la 3 porque sus dependencias reales son del backend,
+no del modelo. El plan completo, con las siete fases repartidas hasta finales de noviembre de
+2026, está en la base de documentación del proyecto.
 
 ## Aviso
 
