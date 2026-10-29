@@ -14,8 +14,16 @@ de que una computadora ajena esté encendida, y por eso se puede prometer en el 
 """
 
 import logging
+import time
 from collections import OrderedDict
+from datetime import datetime
+from uuid import UUID
 
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from app.repositories import bitacora as repo_bitacora
+from app.repositories import usuarios as repo_usuarios
 from app.schemas.explicacion import ExplicacionEntrada, RespuestaExplicacion
 from app.services.explicacion import ollama
 from app.services.explicacion.prompt import mensaje_de_usuario
@@ -100,3 +108,48 @@ def explicar(
 def vaciar_cache() -> None:
     """Para las pruebas: una caché compartida entre pruebas las vuelve dependientes del orden."""
     _cache.clear()
+
+
+def explicar_y_registrar(
+    sesion: Session,
+    entrada: ExplicacionEntrada,
+    url: str | None,
+    modelo: str,
+    timeout_s: float,
+    usuario_uuid: UUID,
+    ahora: datetime,
+) -> RespuestaExplicacion:
+    """`explicar`, más una fila en la bitácora con de dónde salió y cuánto tardó (C-13).
+
+    El tiempo se mide **aquí y no dentro de `explicar`**: lo que interesa es lo que esperó quien
+    preguntó, que incluye un acierto de caché de milisegundos y un tope de diez segundos
+    agotado. Medirlo dentro del cliente de Ollama dejaría fuera los dos casos.
+
+    Si escribir la fila fallara, la explicación **se devuelve igual**. Una bitácora de analítica
+    que tumba la función que vigila es peor que no tenerla, y esta función ya tiene la regla de
+    responder siempre 200 con una explicación (P-13).
+    """
+    comenzo = time.monotonic()
+    respuesta = explicar(entrada, url, modelo, timeout_s)
+    duracion_ms = int((time.monotonic() - comenzo) * 1000)
+    try:
+        # El usuario nace en su primer contacto (decisión 2.7): `explicaciones.usuario_uuid` es
+        # una llave ajena, y sin esta línea la primera explicación de alguien que no ha subido
+        # nada todavía reventaría en PostgreSQL. En SQLite no, porque no comprueba las llaves
+        # ajenas por omisión: sería un error que las pruebas no verían y la entrega sí.
+        repo_usuarios.asegurar_que_existe(sesion, usuario_uuid, ts_alta=ahora)
+        repo_bitacora.registrar(
+            sesion,
+            ts_utc=ahora,
+            usuario_uuid=usuario_uuid,
+            origen=respuesta.origen,
+            motivo=respuesta.motivo,
+            modelo=respuesta.modelo,
+            duracion_ms=duracion_ms,
+            horizonte_min=entrada.horizonte_min,
+            modo=entrada.modo,
+        )
+        sesion.commit()
+    except SQLAlchemyError:
+        sesion.rollback()
+    return respuesta

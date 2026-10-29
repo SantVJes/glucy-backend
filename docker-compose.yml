@@ -34,5 +34,36 @@ services:
       base: {condition: service_healthy}
     ports: ["8000:8000"]
 
+  # El panel de seguimiento (fase 6, paso 2). Los ocho paneles del Documento 2, §10.
+  panel:
+    image: grafana/grafana-oss:11.6.5
+    depends_on:
+      base: {condition: service_healthy}
+    environment:
+      # Las credenciales salen del .env; aquí no vive ninguna.
+      GF_SECURITY_ADMIN_USER: ${GLUCY_GRAFANA_USUARIO}
+      GF_SECURITY_ADMIN_PASSWORD: ${GLUCY_GRAFANA_SECRETO}
+      # Las tres que importan de verdad, y por qué:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"   # el panel detrás de autenticación, siempre
+      GF_USERS_ALLOW_SIGN_UP: "false"      # nadie se da de alta solo
+      # Una «instantánea» de Grafana se publica por omisión en un servidor de Grafana Labs,
+      # fuera de este servidor y sin autenticación. Son datos de salud: queda apagado.
+      GF_SNAPSHOTS_EXTERNAL_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # El origen de datos aprovisionado lee estas dos (grafana/lector.sql las crea).
+      GLUCY_GRAFANA_DB_USUARIO: ${GLUCY_GRAFANA_DB_USUARIO}
+      GLUCY_GRAFANA_DB_SECRETO: ${GLUCY_GRAFANA_DB_SECRETO}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/tableros:/etc/grafana/tableros:ro
+      - panel:/var/lib/grafana
+    # **Solo 127.0.0.1**, no `3000:3000`. Con `3000:3000` Docker abre el puerto en todas las
+    # interfaces y además atraviesa el cortafuegos del anfitrión sin avisar: el panel queda en
+    # internet abierto, que es justo lo que el Documento 2 prohíbe. Para verlo de fuera, un
+    # túnel por SSH: `ssh -L 3000:127.0.0.1:3000 <servidor>`.
+    ports: ["127.0.0.1:3000:3000"]
+
 volumes:
   datos:
+  panel:

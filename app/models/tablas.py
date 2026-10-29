@@ -245,8 +245,34 @@ class EventoXapi(Base):
 
 
 # ---------------------------------------------------------------------------
-# La tabla trece (C-9): no está en el Documento 3.
+# Las tablas trece y catorce (C-9 y C-13): no están en el Documento 3.
 # ---------------------------------------------------------------------------
+
+
+class Explicacion(Base):
+    """La bitácora de `POST /explain`: de aquí lee el panel del modelo de lenguaje (C-13).
+
+    **No guarda ni el prompt, ni el texto de la explicación, ni una cifra de glucosa.** Guardar
+    la explicación sería guardar una frase sobre la glucosa de alguien en una tabla de
+    diagnóstico, y el texto no hace falta para contar cuántas veces contestó el modelo: lo que
+    se cuenta es **si** contestó, **por qué** no y **cuánto** tardó.
+
+    Sin esta tabla, el reporte no puede decir cuántas explicaciones salieron del modelo y
+    cuántas de la plantilla determinista, que es la cifra que hace creíble al componente de IA
+    generativa. El `docstring` de `RespuestaExplicacion` lo pedía desde el paso 6.
+    """
+
+    __tablename__ = "explicaciones"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ts_utc: Mapped[datetime] = mapped_column(FechaUtc, index=True)
+    usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"))
+    origen: Mapped[str]  # "modelo" o "plantilla"
+    motivo: Mapped[str | None] = mapped_column(default=None)
+    modelo: Mapped[str | None] = mapped_column(default=None)
+    duracion_ms: Mapped[int]
+    horizonte_min: Mapped[int | None] = mapped_column(default=None)
+    modo: Mapped[str | None] = mapped_column(default=None)
 
 
 class SerieLimpia(Base):

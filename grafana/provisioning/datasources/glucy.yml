@@ -1,0 +1,27 @@
+# Origen de datos del tablero, aprovisionado: no se crea a mano desde la interfaz.
+#
+# El usuario es **de solo lectura** (`grafana/lector.sql`) y no el de la aplicación. Un panel
+# con un usuario que puede escribir es un `DELETE` a una pulsación de distancia, y lo que hay
+# en esta base son datos de salud aunque estén seudonimizados.
+apiVersion: 1
+
+datasources:
+  - name: Glucy
+    uid: glucy-postgres
+    type: grafana-postgresql-datasource
+    access: proxy
+    # `base` es el servicio de docker-compose; nunca una IP ni un puerto publicado.
+    url: base:5432
+    database: glucy
+    user: ${GLUCY_GRAFANA_DB_USUARIO}
+    secureJsonData:
+      password: ${GLUCY_GRAFANA_DB_SECRETO}
+    jsonData:
+      sslmode: disable          # red interna de compose; nada de esto sale del servidor
+      postgresVersion: 1600
+      timescaledb: true
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    isDefault: true
+    editable: false

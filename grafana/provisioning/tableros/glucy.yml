@@ -1,0 +1,18 @@
+# El tablero se aprovisiona desde el archivo JSON del repositorio.
+#
+# `allowUiUpdates: false` a propósito: el tablero es código, se revisa en un pull request y se
+# puede volver a levantar idéntico en otra máquina. Un tablero editado a mano se pierde con el
+# contenedor y nadie se acuerda de qué decía el panel.
+apiVersion: 1
+
+providers:
+  - name: glucy
+    orgId: 1
+    folder: Glucy
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/tableros
+      foldersFromFilesStructure: false

@@ -98,15 +98,17 @@ def test_55_perfil_compila_en_los_dos_motores(dialecto):
 
 
 @pytest.mark.parametrize("dialecto", DIALECTOS)
-def test_56_las_trece_tablas_compilan_en_los_dos_motores(dialecto):
+def test_56_las_catorce_tablas_compilan_en_los_dos_motores(dialecto):
     tablas = Base.metadata.sorted_tables
 
     for tabla in tablas:
         sql = str(CreateTable(tabla).compile(dialect=dialecto))
         assert f"CREATE TABLE {tabla.name}" in sql
 
-    assert len(tablas) == 13
-    assert "serie_limpia" in {tabla.name for tabla in tablas}
+    assert len(tablas) == 14
+    nombres = {tabla.name for tabla in tablas}
+    assert "serie_limpia" in nombres
+    assert "explicaciones" in nombres
 
 
 def test_serie_limpia_tiene_la_llave_de_la_hipertabla_y_glucose_readings_la_suya():
