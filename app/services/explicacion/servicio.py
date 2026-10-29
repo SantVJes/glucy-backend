@@ -26,6 +26,7 @@ from app.repositories import bitacora as repo_bitacora
 from app.repositories import usuarios as repo_usuarios
 from app.schemas.explicacion import ExplicacionEntrada, RespuestaExplicacion
 from app.services.explicacion import ollama
+from app.services.explicacion.nombres import legibles
 from app.services.explicacion.prompt import mensaje_de_usuario
 from app.services.explicacion.validacion import numeros, revisar
 from referencia.reglas_clinicas import plantilla_explicacion
@@ -65,7 +66,7 @@ def _plantilla(entrada: ExplicacionEntrada, motivo: str) -> RespuestaExplicacion
     texto = plantilla_explicacion(
         entrada.valor_actual,
         entrada.valor_predicho,
-        [(c.variable, c.mg_dl) for c in entrada.shap],
+        legibles([(c.variable, c.mg_dl) for c in entrada.shap]),
     )
     return RespuestaExplicacion(explicacion=texto, origen="plantilla", motivo=motivo)
 

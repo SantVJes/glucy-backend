@@ -7,6 +7,7 @@ producto como una validación.
 """
 
 from app.schemas.explicacion import ExplicacionEntrada
+from app.services.explicacion.nombres import legibles
 
 # El sistema es fijo y no se arma con datos: así no hay forma de que un valor del teléfono
 # cambie las reglas. Las prohibiciones son la regla 7 escrita en el único lugar donde el texto
@@ -40,8 +41,12 @@ def mensaje_de_usuario(entrada: ExplicacionEntrada) -> str:
     Las contribuciones van con su signo y su unidad, ordenadas de mayor a menor en valor
     absoluto: son el contenido de la explicación, y el modelo solo las redacta. Lo que no está
     aquí no existe para el modelo; en particular no está quién es la persona.
+
+    Y van **con nombre en palabras**. El sistema le prohíbe al modelo usar tecnicismos; mandarle
+    `rezago_30` y `derivada_2` lo obligaba a adivinar qué significan para poder obedecer, y un
+    modelo que adivina sobre datos de salud es lo que este servicio existe para evitar.
     """
-    contribuciones = sorted(entrada.shap, key=lambda c: abs(c.mg_dl), reverse=True)
+    contribuciones = legibles([(c.variable, c.mg_dl) for c in entrada.shap])
     lineas = [
         f"Glucosa ahora: {entrada.valor_actual:.0f} mg/dL",
         f"Glucosa estimada en {entrada.horizonte_min} minutos: {entrada.valor_predicho:.0f} mg/dL",
@@ -53,8 +58,5 @@ def mensaje_de_usuario(entrada: ExplicacionEntrada) -> str:
         f"Hora local: {entrada.hora_local} h",
         "Lo que más empuja la estimación, de mayor a menor:",
     ]
-    lineas += [
-        f"- {contribucion.variable}: {contribucion.mg_dl:+.0f} mg/dL"
-        for contribucion in contribuciones
-    ]
+    lineas += [f"- {nombre}: {mg_dl:+.0f} mg/dL" for nombre, mg_dl in contribuciones]
     return "\n".join(lineas)
