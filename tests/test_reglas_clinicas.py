@@ -214,15 +214,22 @@ def test_clarke_no_confunde_un_error_grande_en_zona_alta_con_uno_peligroso():
     assert zona_clarke(70, 100) == "D"
 
 
-def test_clarke_sobrecorregir_es_zona_c_hasta_290_y_no_hasta_180():
-    """Real 200 con predicho 320 es C, no B.
+def test_clarke_sobrecorregir_es_zona_c_y_no_se_acaba_en_290():
+    """Real 200 con predicho 320 es C, y real 300 con predicho 420 también.
 
-    Primera de las tres familias del cotejo del 29/10/2026: la zona C llega hasta 290 mg/dL.
-    Con el corte en 180, 28 105 pares caían en B, y B cuenta para el A+B que el proyecto
-    promete en >= 95 %.
+    Dos correcciones del mismo borde. La primera, del cotejo del 29/10/2026: con la zona C
+    cortada en 180 había 28 105 pares contados como B. La segunda, del cotejo rehecho contra
+    el código SAS: el `real <= 290` del puerto público es **el borde de una gráfica de
+    400 mg/dL**, no una frontera clínica, y recortaba otros 19 900 pares con reales de 291 a
+    489. El rango de Glucy llega a 600 (RF-05).
+
+    B cuenta para el A+B que el proyecto promete en >= 95 %, así que cada uno de esos pares
+    inflaba la cifra que decide si el modelo sirve.
     """
     assert zona_clarke(200, 320) == "C"
     assert zona_clarke(181, 291) == "C"
+    assert zona_clarke(300, 420) == "C"
+    assert zona_clarke(489, 599) == "C"
 
 
 def test_clarke_el_limite_de_la_zona_d_es_inclusivo():
@@ -237,10 +244,13 @@ def test_clarke_el_limite_de_la_zona_d_es_inclusivo():
 def test_clarke_una_hipoglucemia_no_detectada_sigue_siendo_zona_d():
     """Real 60 con predicho 120 es D.
 
-    Tercera familia, y la única donde esta implementación ya era la correcta: el puerto
-    público dice B para 1 224 pares con reales de 59 a 70. Esta prueba existe para que la
-    corrección de las otras dos no se lleve esta de paso, porque es el evento central del
-    proyecto.
+    No detectar una hipoglucemia es la definición de la zona D y el evento central del
+    proyecto, así que esta prueba existe para que ninguna corrección del resto de la rejilla
+    se la lleve de paso.
+
+    (El docstring de `zona_clarke` decía que el puerto público contestaba B aquí. Leído su
+    código fuente, contesta D igual que esta función: la comparación anterior se hizo contra
+    una transcripción equivocada del puerto, y ya está corregido.)
     """
     assert zona_clarke(60, 120) == "D"
     assert zona_clarke(59, 71) == "D"
