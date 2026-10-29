@@ -40,6 +40,11 @@ CONTRIBUCIONES = 5
 # «sintetico» (series de juguete para probar el código, nunca reportable).
 ORIGEN_REPORTABLE = "ohiot1dm"
 
+# El plan B acordado. Se distingue del generador de juguete porque el aviso del arranque es
+# otro: con el simulador la métrica sí va al reporte, pero nunca sin decir que es del
+# simulador.
+ORIGEN_SIMULADO = "simulador"
+
 
 class ArtefactoInvalido(Exception):
     """El manifiesto no describe un modelo que se pueda usar con este pipeline."""
@@ -261,7 +266,15 @@ def cargar(ruta: str | None) -> dict[tuple[str, int], Artefacto]:
             registro.error("artefacto descartado: %s", error)
             continue
         cargados[(artefacto.juego, artefacto.horizonte_min)] = artefacto
-        if artefacto.origen_datos != ORIGEN_REPORTABLE:
+        if artefacto.origen_datos == ORIGEN_SIMULADO:
+            # El simulador fisiológico es el plan B acordado si OhioT1DM no llega, así que su
+            # métrica sí va al documento final; lo que no puede faltar es de dónde salió.
+            registro.warning(
+                "el artefacto %s se entrenó con el simulador fisiológico, no con personas: sus "
+                "métricas van al documento final SOLO diciendo que son del simulador",
+                artefacto.version,
+            )
+        elif artefacto.origen_datos != ORIGEN_REPORTABLE:
             # Que esto salga en el arranque es la diferencia entre «el modelo de juguete se
             # quedó puesto» y descubrirlo al comparar las métricas del reporte con la realidad.
             registro.warning(

@@ -469,6 +469,28 @@ def test_112_un_modelo_entrenado_con_datos_de_juguete_lo_avisa_al_arrancar(tmp_p
     assert any("NO van al documento final" in r.getMessage() for r in caplog.records)
 
 
+def test_112b_un_modelo_del_simulador_avisa_distinto_del_de_juguete(tmp_path: Path, caplog):
+    """El simulador fisiológico no es el generador de juguete, y el aviso no puede ser el mismo.
+
+    El simulador UVA/Padova es el plan B acordado si OhioT1DM no llega: su métrica **sí** va al
+    documento final, pero nunca sin decir de dónde salió. Si el servidor avisara «NO van al
+    documento final», quien lea la bitácora dejaría fuera del reporte la única métrica que
+    tiene, y la alternativa sería reportarla como si fuera de personas.
+    """
+    manifiesto = _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.2.0-simulador", 30)
+    datos = json.loads(manifiesto.read_text())
+    datos["origen_datos"] = "simulador"
+    manifiesto.write_text(json.dumps(datos))
+
+    with caplog.at_level(logging.WARNING):
+        cargados = cargar(str(tmp_path))
+
+    assert cargados[("denso", 30)].origen_datos == "simulador"
+    mensajes = [r.getMessage() for r in caplog.records]
+    assert any("SOLO diciendo que son del simulador" in m for m in mensajes)
+    assert not any("NO van al documento final" in m for m in mensajes)
+
+
 def test_113_un_artefacto_de_ohiot1dm_no_avisa_nada(tmp_path: Path, caplog):
     _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.1.0", 30)
 
