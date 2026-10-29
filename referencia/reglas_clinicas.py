@@ -441,20 +441,47 @@ def zona_clarke(real: float, predicho: float) -> str:
     30 mg/dL cerca de 70 es peligroso, el mismo cerca de 200 no lo es. Meta del proyecto:
     ≥ 95 % de las predicciones en A+B.
 
-    Implementación de la formulación habitual de Clarke et al. (1987). Antes de reportar
-    métricas en el documento final conviene cotejarla contra el artículo original y contra
-    una implementación publicada: el orden de las condiciones es lo que decide el resultado.
+    **El orden de las condiciones decide el resultado**: las zonas se solapan y se evalúan de
+    la más benigna a la más grave por diseño. Cambiar el orden cambia las métricas.
+
+    Cotejada el 29/10/2026 contra el puerto de Python de la implementación de MATLAB File
+    Exchange, par por par sobre los 337 561 pares enteros de 20 a 600 mg/dL. La versión
+    anterior de esta función no coincidía en 29 690 pares, en tres familias:
+
+    1. **28 105 pares.** Real de 181 a 290 con predicho de `real + 110` o más: decía **B** y
+       es **C**. Acotaba la zona C por arriba en 180 en lugar de 290. Caso: (200, 320), que
+       invita a sobrecorregir.
+    2. **361 pares.** Real de 240 o más con predicho de exactamente 180: decía **B** y es
+       **D**. Comparaba con `70 < p < 180` donde va `70 <= p <= 180`. Caso: (300, 180).
+    3. **1 224 pares.** Real de 59 a 70 con predicho de 71 a 180: decía **D**, y el puerto
+       público dice B. **Aquí esta función tenía razón y se mantiene**: la condición del
+       puerto pide `p >= (7/5)*real + 110`, que con un real de 60 son 194, y arriba de 180 ya
+       manda la zona E, así que esa rama nunca se activa. Un real de 60 predicho como 120 es
+       «no detectar una hipoglucemia», que es la definición de la zona D y el evento central
+       del proyecto.
+
+    Las dos primeras se corrigen aquí. Importa porque B cuenta para el A+B que el proyecto
+    promete en >= 95 %: llamar B a lo que es C o D infla justo la cifra que decide si el
+    modelo sirve. `src/eval/clarke.py` de `glucy-ml` implementa esta misma formulación y sus
+    pruebas fijan los tres casos.
+
+    Sigue pendiente cotejar contra el artículo original de 1987, que no está accesible sin
+    suscripción. Hasta entonces, el documento final tiene que decir qué formulación se usó.
     """
     if (abs(predicho - real) <= 0.2 * real) or (real <= 70 and predicho <= 70):
         return "A"
     if (real >= 180 and predicho <= 70) or (real <= 70 and predicho >= 180):
         return "E"
-    if (real <= 70 < predicho < 180) or (real >= 240 and 70 < predicho < 180):
-        return "D"
-    if (70 <= real <= 180 and predicho >= real + 110) or (
+    if (70 <= real <= 290 and predicho >= real + 110) or (
         130 <= real <= 180 and predicho <= (7 / 5) * real - 182
     ):
         return "C"
+    if (
+        (real >= 240 and 70 <= predicho <= 180)
+        or (real <= 175 / 3 and 70 <= predicho <= 180)
+        or (175 / 3 <= real <= 70 and predicho >= 1.2 * real)
+    ):
+        return "D"
     return "B"
 
 
