@@ -11,7 +11,7 @@ en `/docs`.
 | `/insulin` | POST | lote de dosis | **fase 2, paso 2** |
 | `/perfil` | POST | los seis parámetros clínicos del perfil (el octavo, C-7) | **fase 2, paso 2** |
 | `/predict` | GET | predicción a 30 y 60 min y con qué modo respondió | paso 5 |
-| `/explain` | POST | explicación en lenguaje natural | paso 6 |
+| `/explain` | POST | explicación en lenguaje natural | **fase 2, paso 6** |
 | `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | **fase 2, paso 3** |
 | `/history` | GET | histórico para el panel y la exportación | **fase 2, paso 3** |
 
@@ -512,4 +512,119 @@ B=$(python scripts/token-de-prueba.py 22222222-2222-2222-2222-222222222222)
 curl -s "localhost:8000/history?desde=2026-10-01T00:00:00Z&hasta=2026-11-01T00:00:00Z" \
   -H "Authorization: Bearer $B"
 # {"lecturas":[],"comidas":[],"dosis":[],"siguiente":null}
+```
+
+---
+
+## `POST /explain`
+
+La explicación en lenguaje natural de una predicción (RF-28, punto 11 de la rúbrica). Es la
+**única** pieza del sistema que habla con un modelo de lenguaje, y la app no sabe qué modelo hay
+del otro lado: cambiarlo no toca ni una línea de Swift.
+
+**Siempre responde `200` con una explicación.** Si el modelo de lenguaje no contesta en 10
+segundos, si inventa una cifra, si insinúa un tratamiento o si la persona apagó el asistente,
+sale la **plantilla determinista** y `origen` lo dice (P-13). La función no depende de que una
+computadora ajena esté encendida.
+
+### Petición
+
+El cuerpo lleva la predicción y sus valores SHAP, porque `predictions` no tiene columna para las
+contribuciones: el teléfono manda lo que `/predict` le devolvió.
+
+```json
+{
+  "valor_actual": 112,
+  "valor_predicho": 74,
+  "horizonte_min": 30,
+  "modo": "sensor",
+  "umbral_hipo": 70,
+  "umbral_hiper": 180,
+  "cob_g": 12,
+  "iob_ui": 2.5,
+  "hora_local": 3,
+  "shap": [
+    {"variable": "insulina que sigue activa", "mg_dl": -20},
+    {"variable": "tendencia de la última media hora", "mg_dl": -10},
+    {"variable": "carbohidratos que siguen activos", "mg_dl": -8}
+  ],
+  "asistente_activo": true
+}
+```
+
+**Qué se envía y qué no.** Eso es todo lo que el modelo de lenguaje ve: glucosa actual y
+predicha, horizonte y modo, umbrales, COB e IOB del momento, hora del día y las cinco
+contribuciones más grandes. **Nunca** el nombre, los apellidos, el `usuario_uuid`, las notas,
+las fotografías, el peso, el año de nacimiento, la ubicación ni el historial. Con
+`extra="forbid"`, si la app mandara uno de esos campos la respuesta es `400` con el motivo, no
+un campo que se ignora en silencio y acaba en el prompt.
+
+`asistente_activo` lo manda el teléfono en cada petición porque la preferencia es del teléfono
+(regla 1): el servidor no guarda si la persona apagó el asistente.
+
+### Respuesta
+
+```json
+{
+  "explicacion": "Vas a bajar en la próxima media hora, sobre todo porque la insulina que te aplicaste sigue activa. Es una estimación: conviene confirmarla con una medición.",
+  "origen": "modelo",
+  "motivo": null,
+  "modelo": "qwen3:8b"
+}
+```
+
+Con la plantilla:
+
+```json
+{
+  "explicacion": "Baja sobre todo por insulina que sigue activa (-20 mg/dL) y por tendencia de la última media hora (-10 mg/dL). Es una estimación: conviene confirmar con una medición antes de actuar.",
+  "origen": "plantilla",
+  "motivo": "sin_respuesta",
+  "modelo": null
+}
+```
+
+`motivo` es uno de tres: `sin_asistente` (apagado, o sin Ollama configurado), `sin_respuesta`
+(se pasó del tope o contestó un error) y `no_paso_validacion`.
+
+### Cómo se revisa la respuesta antes de mostrarla
+
+Lo que no pasa estas dos comprobaciones **se descarta**; no se corrige ni se recorta.
+
+1. **Ninguna indicación de tratamiento.** Es la regla 7, y se revisa primero porque es la que
+   puede lastimar a alguien: cualquier «ponte», «aplícate», «toma», «come», «corrige», «bolo»,
+   «basal», «debes», «necesitas», «UI» o «unidades de insulina» bloquea la respuesta. «Sube» y
+   «baja» **no** bloquean —la explicación habla justo de eso— pero «sube la dosis» sí.
+2. **Ninguna cifra que no viniera en la petición.** Se comparan las magnitudes, porque una
+   contribución de −20 mg/dL se puede redactar como «quita 20 mg/dL» y el signo lo llevan las
+   palabras. Un 68 que nadie dio, o un 112 redondeado a 110, bloquean la respuesta.
+
+Se falla cerrado a propósito: un falso positivo cuesta una frase menos natural, y un falso
+negativo es una app no certificada insinuando un tratamiento.
+
+### Determinismo y caché
+
+Temperatura 0, semilla fija y tope de 160 fichas: la misma predicción produce siempre la misma
+explicación, así que se puede revisar y citar. La caché es en memoria del proceso, con tope de
+512 entradas, y su llave son los valores redondeados **sin nada de quién preguntó**: dos
+personas con los mismos números comparten entrada, y la caché no guarda nada de nadie.
+
+### Configuración
+
+```
+GLUCY_OLLAMA_URL=            # vacío = siempre la plantilla, y la app funciona igual
+GLUCY_OLLAMA_MODELO=qwen3:8b
+GLUCY_EXPLICACION_TIMEOUT_S=10
+```
+
+### Prueba a mano, sin Ollama
+
+```bash
+# Sin GLUCY_OLLAMA_URL, el endpoint contesta con la plantilla y nunca sale a la red.
+T=$(python scripts/token-de-prueba.py 11111111-1111-1111-1111-111111111111)
+curl -s localhost:8000/explain -H "Authorization: Bearer $T" \
+  -H 'Content-Type: application/json' -d '{
+    "valor_actual": 112, "valor_predicho": 74, "horizonte_min": 30, "modo": "sensor",
+    "umbral_hipo": 70, "umbral_hiper": 180, "cob_g": 12, "iob_ui": 2.5, "hora_local": 3,
+    "shap": [{"variable": "insulina que sigue activa", "mg_dl": -20}]}'
 ```

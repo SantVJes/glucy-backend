@@ -12,3 +12,6 @@ pyjwt>=2.8
 numpy>=2.0
 # El controlador de PostgreSQL (paso 4). SQLite no lo necesita.
 psycopg[binary]>=3.2
+# El cliente del modelo de lenguaje (paso 6). Se usa httpx y no urllib porque el tope de
+# 10 s tiene que cubrir toda la llamada, no solo la conexión.
+httpx>=0.27
