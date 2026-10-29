@@ -444,35 +444,61 @@ def zona_clarke(real: float, predicho: float) -> str:
     **El orden de las condiciones decide el resultado**: las zonas se solapan y se evalúan de
     la más benigna a la más grave por diseño. Cambiar el orden cambia las métricas.
 
-    Cotejada el 29/10/2026 contra el puerto de Python de la implementación de MATLAB File
-    Exchange, par por par sobre los 337 561 pares enteros de 20 a 600 mg/dL. La versión
-    anterior de esta función no coincidía en 29 690 pares, en tres familias:
+    ## El cotejo, rehecho el 29/10/2026 contra las dos implementaciones públicas
 
-    1. **28 105 pares.** Real de 181 a 290 con predicho de `real + 110` o más: decía **B** y
-       es **C**. Acotaba la zona C por arriba en 180 en lugar de 290. Caso: (200, 320), que
-       invita a sobrecorregir.
-    2. **361 pares.** Real de 240 o más con predicho de exactamente 180: decía **B** y es
-       **D**. Comparaba con `70 < p < 180` donde va `70 <= p <= 180`. Caso: (300, 180).
-    3. **1 224 pares.** Real de 59 a 70 con predicho de 71 a 180: decía **D**, y el puerto
-       público dice B. **Aquí esta función tenía razón y se mantiene**: la condición del
-       puerto pide `p >= (7/5)*real + 110`, que con un real de 60 son 194, y arriba de 180 ya
-       manda la zona E, así que esa rama nunca se activa. Un real de 60 predicho como 120 es
-       «no detectar una hipoglucemia», que es la definición de la zona D y el evento central
-       del proyecto.
+    Se comparó par por par sobre los 337 561 pares enteros de 20 a 600 mg/dL contra:
 
-    Las dos primeras se corrigen aquí. Importa porque B cuenta para el A+B que el proyecto
-    promete en >= 95 %: llamar B a lo que es C o D infla justo la cifra que decide si el
-    modelo sirve. `src/eval/clarke.py` de `glucy-ml` implementa esta misma formulación y sus
-    pruebas fijan los tres casos.
+    - el puerto de Python de la implementación de MATLAB File Exchange
+      (`suetAndTie/ClarkeErrorGrid`), leyendo su código fuente, y
+    - el código SAS del paper 133-2013 del SAS Global Forum.
+
+    Con el puerto, esta función **coincide en los 337 561 pares**. Con el código SAS difiere
+    en cuatro familias, y tres son `<` contra `<=` en los umbrales exactos 70, 180 y 240, donde
+    esta función ya toma la lectura severa. La cuarta sí es de fondo:
+
+    **19 900 pares: real de 291 a 489 con predicho de `real + 110` o más.** Esta función decía
+    **B** —igual que el puerto— y el código SAS dice **C**. El SAS tiene razón, y el motivo es
+    bueno: el puerto acota la zona C con `real <= 290`, y **290 es el punto donde la recta
+    `y = x + 110` se sale por arriba de una gráfica de 0 a 400 mg/dL**, que es exactamente el
+    `set_ylim([0, 400])` de su código. No es una frontera clínica, es el borde del dibujo. El
+    rango válido de Glucy es 20 a 600 (RF-05), así que ese tope recortaba la zona C justo donde
+    este proyecto todavía tiene datos: un real de 300 predicho como 420 invita a sobrecorregir
+    a lo grande, y salía contado como error benigno. Se quita el tope.
+
+    ## Lo que la versión anterior de esta función tenía mal, y una corrección
+
+    Antes acotaba la zona C por arriba en 180 (28 105 pares que son C y decía B) y comparaba
+    con `70 < p < 180` donde va `70 <= p <= 180` (361 pares que son D y decía B). Las dos ya
+    estaban corregidas.
+
+    **Y una afirmación de este mismo docstring estaba equivocada.** Decía que para un real de
+    59 a 70 con predicho de 71 a 180 el puerto público contestaba B por culpa de una condición
+    `p >= (7/5)*real + 110`. Leído el archivo, la condición del puerto es `p >= (6/5)*real`,
+    la misma de aquí, y contesta **D** igual que esta función. No había tal discrepancia: la
+    comparación anterior se hizo contra una transcripción equivocada del puerto.
+
+    ## Por qué importa
+
+    B cuenta para el A+B que el proyecto promete en >= 95 %: llamar B a lo que es C o D infla
+    justo la cifra que decide si el modelo sirve. Donde las formulaciones públicas difieren,
+    aquí se toma **la severa**. Si al cotejar contra el artículo original resultara que la
+    indulgente es la correcta, el proyecto habría reportado una métrica peor que la real, que
+    es el error que se puede defender; al revés, no.
+
+    `src/eval/clarke.py` de `glucy-ml` implementa esta misma formulación, y hay pruebas en los
+    dos repositorios que fijan los casos concretos.
 
     Sigue pendiente cotejar contra el artículo original de 1987, que no está accesible sin
-    suscripción. Hasta entonces, el documento final tiene que decir qué formulación se usó.
+    suscripción. Hasta entonces, el documento final tiene que decir **qué formulación se usó**
+    y no solo «rejilla de Clarke».
     """
     if (abs(predicho - real) <= 0.2 * real) or (real <= 70 and predicho <= 70):
         return "A"
     if (real >= 180 and predicho <= 70) or (real <= 70 and predicho >= 180):
         return "E"
-    if (70 <= real <= 290 and predicho >= real + 110) or (
+    # Sin tope por arriba: el `real <= 290` del puerto público es el borde de una gráfica de
+    # 400 mg/dL, no una frontera clínica, y aquí el rango llega a 600.
+    if (real >= 70 and predicho >= real + 110) or (
         130 <= real <= 180 and predicho <= (7 / 5) * real - 182
     ):
         return "C"
