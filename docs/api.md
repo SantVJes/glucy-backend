@@ -643,21 +643,51 @@ manifiesto por modelo:
 
 ```json
 {
-  "version": "m1-v0.1.0",
+  "modelo": "m1",
+  "version": "v0.1.0",
   "algoritmo": "xgboost",
   "horizonte_min": 30,
   "juego": "denso",
   "caracteristicas": ["mg_dl", "rezago_5", "rezago_10", "…"],
-  "archivo": "m1-v0.1.0.json",
-  "metricas": {"rmse": 18.2, "clarke_ab": 96.1}
+  "metricas": {
+    "rmse": 18.2,
+    "clarke_ab": 96.1,
+    "clarke_reparto": {"A": 82.0, "B": 14.1},
+    "sensibilidad_hipo": null
+  }
 }
 ```
+
+Esa es la forma **real**, la que escribe `src/train/artefacto.py` de `glucy-ml`, y durante un
+tiempo no era la que este servidor esperaba. Tres diferencias, cada una capaz de dejar
+`/predict` en `503` para siempre:
+
+- El archivo se llama `m1-v0.1.0.json` y **no** `m1-v0.1.0.manifiesto.json`, que era lo que
+  buscaba el cargador. Un patrón que no encuentra nada no es un error, así que la carpeta
+  quedaba vacía sin un solo renglón de registro que lo dijera. Ahora se miran todos los `.json`
+  de la carpeta y se distingue «no es un manifiesto» (se salta en `debug`: ahí viven también el
+  modelo en texto y el informe de la conversión a Core ML) de «es un manifiesto y está mal» (se
+  registra como error y se salta, que uno roto no tire los demás).
+- **No hay campo `archivo`.** El modelo es el hermano con la misma raíz y extensión `.ubj`, el
+  formato binario de XGBoost. Se sigue aceptando `archivo` si viene.
+- **`modelo` y `version` vienen por separado**, y lo que se guarda en `predictions.modelo_version`
+  es la versión completa (RF-25), así que se componen: `m1` + `v0.1.0` → `m1-v0.1.0`.
+- **`metricas` trae valores que no son números**: `clarke_reparto` es un diccionario y
+  `sensibilidad_hipo` puede ser nulo —y tiene que poder serlo, porque `glucy-ml` lo deja nulo
+  cuando el conjunto no traía hipoglucemias reales en lugar de reportar un 100 % que sería la
+  cifra más engañosa del reporte—. Se toman solo los numéricos.
+
+Y una cosa que el manifiesto sí trae y que el servidor ahora no se guarda: **`origen_datos`**
+(`ohiot1dm`, `simulador` o `sintetico`). Si no es `ohiot1dm`, el arranque lo avisa en la
+bitácora diciendo que esas métricas no van al documento final. Sin ese aviso, un modelo
+entrenado con series de juguete se sirve igual que uno de verdad y lo único que cambia es que
+los números del reporte serían mentira. No viaja en la respuesta de `/predict`: eso cambiaría el
+contrato con la app.
 
 El manifiesto **declara la lista de características y el servidor la compara** contra la que
 produce el pipeline. Si no coinciden, el artefacto no se carga y `/predict` contesta `503`. Es
 la comprobación más valiosa del paso: alimentar el modelo con las columnas cambiadas de lugar da
-números plausibles y equivocados, y nada falla. Un manifiesto malo se registra y se salta, así
-que uno roto no tira los demás.
+números plausibles y equivocados, y nada falla.
 
 **Sin carpeta configurada la API arranca igual** y este endpoint contesta `503`: una app que
 solo quiere subir sus lecturas no necesita el modelo para nada (regla 1).

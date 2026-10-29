@@ -14,7 +14,11 @@ from app.models.tablas import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` no es decoración: por omisión `fileConfig` **apaga**
+    # todos los registradores que ya existan, y como las pruebas corren `alembic upgrade head`
+    # dentro del mismo proceso, eso dejaba mudos los de `app.*`. Un error que se registra y no
+    # se ve es un error que no se registra.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Una URL fijada desde fuera (las pruebas lo hacen) gana a la del entorno.
 if not config.get_main_option("sqlalchemy.url"):

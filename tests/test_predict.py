@@ -9,6 +9,7 @@ El artefacto de la fase 3 entra exactamente igual: su manifiesto en la misma car
 """
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -296,3 +297,182 @@ def test_116_rf21_responde_en_menos_de_200_ms(con_modelo: TestClient):
         assert respuesta.status_code == 200
     mediana = sorted(tiempos)[len(tiempos) // 2]
     assert mediana < 200, f"mediana {mediana:.0f} ms, tiempos {[round(t) for t in tiempos]}"
+
+
+# ---------------------------------------------------------------------------
+# El contrato con glucy-ml: cargar el manifiesto que ese repositorio produce **de verdad**.
+#
+# La primera versión de este cargador no cargaba ninguno. Buscaba `*.manifiesto.json`, exigía
+# un campo `archivo`, esperaba la versión completa en un solo campo y convertía toda métrica
+# con `float()`; `glucy-ml` escribe `m1-v0.1.0.json` junto a `m1-v0.1.0.ubj`, con `modelo` y
+# `version` aparte y con un diccionario y un nulo entre las métricas. El resultado era que
+# `/predict` iba a contestar 503 para siempre **sin un solo renglón de registro que lo
+# explicara**, porque un glob que no encuentra nada no es un error.
+#
+# Estas pruebas copian la forma real del manifiesto, no la que se suponía.
+# ---------------------------------------------------------------------------
+
+
+def _artefacto_como_lo_deja_glucy_ml(carpeta: Path, modelo: str, version: str, horizonte: int):
+    """Un artefacto con la forma exacta que produce `src/train/artefacto.py` de glucy-ml."""
+    generador = np.random.default_rng(3)
+    filas = generador.uniform(60, 250, size=(300, len(CARACTERISTICAS_DENSAS)))
+    booster = xgboost.train(
+        {"max_depth": 3, "seed": 1, "base_score": 0.5},
+        xgboost.DMatrix(
+            filas, label=filas[:, 0] * 0.95, feature_names=list(CARACTERISTICAS_DENSAS)
+        ),
+        num_boost_round=8,
+    )
+    base = carpeta / f"{modelo}-{version}"
+    # `.ubj`, el formato binario de XGBoost, que es el que guarda glucy-ml. Y **sin** campo
+    # `archivo` en el manifiesto: el nombre se deduce del suyo.
+    booster.save_model(f"{base}.ubj")
+    manifiesto = Path(f"{base}.json")
+    manifiesto.write_text(
+        json.dumps(
+            {
+                "modelo": modelo,
+                "version": version,
+                "algoritmo": "xgboost",
+                "horizonte_min": horizonte,
+                "juego": "denso",
+                "caracteristicas": list(CARACTERISTICAS_DENSAS),
+                "semilla": 42,
+                "hiperparametros": {"max_depth": 3},
+                "origen_datos": "ohiot1dm",
+                "n_entrenamiento": 300,
+                "n_prueba": 100,
+                "sujetos_entrenamiento": ["559", "563"],
+                "sujetos_prueba": [],
+                "metricas": {
+                    "n": 100,
+                    "horizonte_min": horizonte,
+                    "rmse": 18.2,
+                    "mae": 13.1,
+                    "mard": 9.4,
+                    "clarke_ab": 96.1,
+                    # Un diccionario, que con `float()` reventaba.
+                    "clarke_reparto": {"A": 82.0, "B": 14.1},
+                    # Y un nulo, que **tiene que poder serlo**: glucy-ml lo deja nulo cuando el
+                    # conjunto no traía hipoglucemias reales, en lugar de reportar un 100 %.
+                    "sensibilidad_hipo": None,
+                    "falsas_alarmas": 11.0,
+                },
+                "protocolo": "LOSO sobre doce sujetos",
+                "version_del_manifiesto": 1,
+            }
+        )
+    )
+    return manifiesto
+
+
+def test_105_se_carga_el_manifiesto_que_glucy_ml_produce_de_verdad(tmp_path: Path):
+    manifiesto = _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.1.0", 30)
+
+    artefacto = cargar_uno(manifiesto)
+
+    # La versión se compone de `modelo` y `version`, que es lo que se registra en
+    # `predictions.modelo_version` (RF-25).
+    assert artefacto.version == "m1-v0.1.0"
+    assert artefacto.horizonte_min == 30
+    assert artefacto.caracteristicas == CARACTERISTICAS_DENSAS
+    # Las métricas numéricas sí; el diccionario y el nulo, fuera, sin reventar.
+    assert artefacto.metricas["rmse"] == pytest.approx(18.2)
+    assert artefacto.metricas["clarke_ab"] == pytest.approx(96.1)
+    assert "clarke_reparto" not in artefacto.metricas
+    assert "sensibilidad_hipo" not in artefacto.metricas
+
+
+def test_106_la_carpeta_de_glucy_ml_se_encuentra_entre_otros_json(tmp_path: Path):
+    """Junto al manifiesto viven el modelo en texto y el informe de la conversión a Core ML."""
+    _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.1.0", 30)
+    _artefacto_como_lo_deja_glucy_ml(tmp_path, "m2", "v0.1.0", 60)
+    # Lo que de verdad comparte esa carpeta y no es un manifiesto.
+    (tmp_path / "m1-v0.1.0-coreml.json").write_text(json.dumps({"la_traduccion_es_fiel": True}))
+    (tmp_path / "notas.json").write_text(json.dumps([1, 2, 3]))
+
+    cargados = cargar(str(tmp_path))
+
+    assert sorted(cargados) == [("denso", 30), ("denso", 60)]
+    assert cargados[("denso", 30)].version == "m1-v0.1.0"
+    assert cargados[("denso", 60)].version == "m2-v0.1.0"
+
+
+def test_107_un_manifiesto_sin_el_modelo_al_lado_lo_dice_claro(tmp_path: Path):
+    manifiesto = _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.1.0", 30)
+    (tmp_path / "m1-v0.1.0.ubj").unlink()
+
+    with pytest.raises(ArtefactoInvalido, match="no está el archivo del modelo"):
+        cargar_uno(manifiesto)
+
+
+def test_108_un_manifiesto_escrito_a_mano_sigue_cargando(tmp_path: Path):
+    """La forma vieja no se rompe: `archivo` manda si viene, y la versión puede ir completa."""
+    manifiesto = _entrenar(tmp_path, "m1-v0.2.0", 30, 0.9)
+
+    artefacto = cargar_uno(manifiesto)
+
+    assert artefacto.version == "m1-v0.2.0"
+    assert artefacto.metricas["rmse"] == pytest.approx(18.2)
+
+
+def test_109_la_version_no_se_duplica_si_ya_trae_el_modelo_adelante(tmp_path: Path):
+    manifiesto = _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "m1-v0.3.0", 30)
+    assert cargar_uno(manifiesto).version == "m1-v0.3.0"
+
+
+def test_110_un_json_que_no_es_manifiesto_no_estorba_ni_se_reporta_como_error(
+    tmp_path: Path, caplog
+):
+    (tmp_path / "cualquiera.json").write_text(json.dumps({"hola": "mundo"}))
+
+    with caplog.at_level(logging.ERROR):
+        assert cargar(str(tmp_path)) == {}
+
+    assert caplog.records == []
+
+
+def test_111_un_manifiesto_corrupto_que_se_declara_como_tal_si_se_reporta(tmp_path: Path, caplog):
+    """Quien nombró el archivo `.manifiesto.json` dijo lo que era: saltárselo en silencio
+    esconde el problema.
+
+    Esta prueba fija además algo que no se ve: `migrations/env.py` tiene que llamar a
+    `fileConfig` con `disable_existing_loggers=False`. Sin eso, correr una migración dentro del
+    proceso apaga los registradores de `app.*` y este registro de error desaparece.
+    """
+    (tmp_path / "roto.manifiesto.json").write_text("{ esto no es json")
+
+    with caplog.at_level(logging.ERROR):
+        assert cargar(str(tmp_path)) == {}
+
+    assert any("descartado" in r.message for r in caplog.records)
+
+
+def test_112_un_modelo_entrenado_con_datos_de_juguete_lo_avisa_al_arrancar(tmp_path: Path, caplog):
+    """Un artefacto sintético se carga, pero no se calla.
+
+    `glucy-ml` marca el origen (`ohiot1dm`, `simulador`, `sintetico`) porque una métrica que no
+    se puede reportar tiene que decirlo en el archivo. El servidor lo repite en el arranque: sin
+    este aviso, un modelo entrenado con senos se sirve igual que uno de verdad y lo único que
+    cambia es que los números del documento final serían mentira.
+    """
+    manifiesto = _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.0.2-pruebas", 30)
+    datos = json.loads(manifiesto.read_text())
+    datos["origen_datos"] = "sintetico"
+    manifiesto.write_text(json.dumps(datos))
+
+    with caplog.at_level(logging.WARNING):
+        cargados = cargar(str(tmp_path))
+
+    assert cargados[("denso", 30)].origen_datos == "sintetico"
+    assert any("NO van al documento final" in r.getMessage() for r in caplog.records)
+
+
+def test_113_un_artefacto_de_ohiot1dm_no_avisa_nada(tmp_path: Path, caplog):
+    _artefacto_como_lo_deja_glucy_ml(tmp_path, "m1", "v0.1.0", 30)
+
+    with caplog.at_level(logging.WARNING):
+        assert cargar(str(tmp_path))[("denso", 30)].origen_datos == "ohiot1dm"
+
+    assert caplog.records == []
