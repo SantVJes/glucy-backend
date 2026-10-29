@@ -370,9 +370,19 @@ def test_la_bitacora_no_guarda_el_texto_ni_ninguna_cifra_de_glucosa(cliente: Tes
     columnas = {c.name for c in fila.__table__.columns}
     assert "explicacion" not in columnas
     assert "prompt" not in columnas
-    guardado = " ".join(str(getattr(fila, c)) for c in columnas)
+
+    # La marca de tiempo y el UUID quedan fuera de la búsqueda, y no es para que pase: son los
+    # dos campos que **tienen** que estar ahí, no guardan ninguna cifra clínica, y sus dígitos
+    # son azarosos. Buscando dentro de ellos esta prueba fallaba sola cada vez que a los
+    # microsegundos les tocaba contener «74», que es el peor tipo de prueba: una que acusa en
+    # falso de vez en cuando y enseña a no creerle.
+    sin_mirar = {"ts_utc", "usuario_uuid", "id"}
+    guardado = " ".join(str(getattr(fila, c)) for c in columnas - sin_mirar)
     assert "112" not in guardado  # el valor actual de la petición
     assert "74" not in guardado  # el valor predicho
+    # Y que lo que sí se mira sea algo: una resta de conjuntos mal escrita dejaría la búsqueda
+    # vacía y la prueba pasaría sin comprobar nada.
+    assert guardado.strip()
 
 
 def test_el_usuario_nace_en_su_primer_contacto_aunque_solo_pida_una_explicacion(
