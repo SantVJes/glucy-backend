@@ -25,14 +25,18 @@ DOCE_TABLAS = {
 }
 
 
-def test_14_alembic_crea_las_doce_tablas_y_uuid_es_unico(tmp_path: Path):
+def test_14_alembic_crea_las_catorce_tablas_y_uuid_es_unico(tmp_path: Path):
     url = f"sqlite:///{tmp_path / 'esquema.db'}"
     migrar(url)
     motor = crear_motor(url)
 
     inspector = inspect(motor)
-    # C-9 (paso 4): la tabla trece, `serie_limpia`, no está en el Documento 3.
-    assert set(inspector.get_table_names()) - {"alembic_version"} == DOCE_TABLAS | {"serie_limpia"}
+    # Las dos que no están en el Documento 3, cada una anotada donde se decidió:
+    # `serie_limpia` es C-9 (paso 4) y `explicaciones` es C-13 (paso 2 de la fase 6).
+    assert set(inspector.get_table_names()) - {"alembic_version"} == DOCE_TABLAS | {
+        "serie_limpia",
+        "explicaciones",
+    }
     assert inspector.get_pk_constraint("glucose_readings")["constrained_columns"] == ["uuid"]
 
     # Y que la base lo haga cumplir, no solo que lo declare.

@@ -1,0 +1,589 @@
+{
+  "uid": "glucy-panel",
+  "title": "Glucy — panel de seguimiento",
+  "description": "Los ocho paneles del Documento 2, §10. Datos seudonimizados: el servidor no sabe quién es nadie. Se aprovisiona desde el repositorio y no se edita desde la interfaz.",
+  "tags": [
+    "glucy",
+    "fase6"
+  ],
+  "timezone": "browser",
+  "editable": false,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Cómo se lee este tablero",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 18,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Este tablero no es un resultado de población.** Enseña los datos seudonimizados de las personas que usan Glucy, y mientras sean menos de 30 toda curva de aquí abajo es **no concluyente**: describe a quien está, no a quien tiene diabetes. Ningún panel lleva nombres, y el servidor no los tiene (regla 3): solo conoce un UUID.\n\nGlucy no es un dispositivo médico certificado: informa, nunca prescribe ni administra, y jamás calcula ni sugiere una dosis de insulina."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Personas en el periodo",
+      "description": "Cuántas personas distintas hay detrás de todo lo demás. Con menos de 30 el tablero entero es no concluyente.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Cabecera del tablero, no uno de los ocho paneles: cuántas personas hay detrás de todo lo\n-- que se ve abajo.\n--\n-- Es la regla que el Documento 2 pide para este tablero: **todo panel con pocos usuarios\n-- detrás se marca no concluyente**. Escrito una vez arriba y en grande, para que nadie lea una\n-- curva de doce personas como si fuera una población.\nSELECT COUNT(DISTINCT usuario_uuid) AS personas\nFROM agregados_diarios\nWHERE $__timeFilter(periodo)\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Glucosa por hora del día",
+      "description": "Promedio y rango por hora **local** de cada lectura, con su propia zona horaria. Se lee de `serie_limpia` y no de los agregados porque `agregados_horarios` guarda la hora local convertida a UTC y no tiene columna de zona, así que de ahí saldría la hora UTC: en México, la curva corrida seis horas (C-14). Sin filas atípicas.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          },
+          "unit": "mgdL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "Hora local",
+        "orientation": "vertical",
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 1: distribución de glucosa por hora del día **local**.\n--\n-- Lee `serie_limpia` y no `agregados_horarios`, aunque los agregados ya estén calculados y\n-- fueran más baratos. El motivo: `agregados_horarios.periodo` guarda el inicio de la hora\n-- local **convertido a UTC** y la tabla no tiene columna de zona, así que de ahí no se puede\n-- recuperar la hora local. `EXTRACT(HOUR FROM periodo)` devuelve la hora UTC, y para México\n-- eso corre la curva seis horas: una bajada de las 03:00 de la madrugada aparecería a las\n-- 09:00. En el panel cuya pregunta es «¿a qué hora del día me baja?», eso no es un detalle.\n-- Queda anotado como C-14: cerrarlo pide una columna `zona_horaria` en los agregados.\n--\n-- El promedio, el mínimo y el máximo **no son reglas clínicas** —así lo dice el propio\n-- `agregados.py`—, así que calcularlos aquí no es una cuarta implementación de nada. El TIR\n-- sí lo es, y por eso el panel 2 lo lee ya calculado en lugar de rehacerlo en SQL.\n--\n-- Las atípicas quedan fuera, igual que en los agregados: son artefactos del sensor.\nSELECT\n  EXTRACT(HOUR FROM (ts_utc AT TIME ZONE zona_horaria))::int AS \"Hora local\",\n  ROUND(AVG(mg_dl)::numeric, 1)                              AS \"Promedio\",\n  ROUND(MIN(mg_dl)::numeric, 1)                              AS \"Mínimo\",\n  ROUND(MAX(mg_dl)::numeric, 1)                              AS \"Máximo\",\n  ROUND(\n    PERCENTILE_CONT(0.1) WITHIN GROUP (ORDER BY mg_dl)::numeric, 1\n  )                                                          AS \"Percentil 10\",\n  ROUND(\n    PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY mg_dl)::numeric, 1\n  )                                                          AS \"Percentil 90\",\n  COUNT(DISTINCT usuario_uuid)                               AS \"Personas\"\nFROM serie_limpia\nWHERE $__timeFilter(ts_utc)\n  AND NOT atipica\nGROUP BY 1\nORDER BY 1\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Tiempo en rango, bajo y alto",
+      "description": "TIR, TBR y TAR por día **local**, leídos ya calculados de `agregados_diarios`: los calcula el pipeline con la referencia clínica, y rehacerlos en SQL sería una cuarta implementación de las mismas reglas sin nada que la compare. Rango objetivo 70-180 mg/dL. Con varias zonas horarias un mismo día de calendario aparece como puntos distintos (C-14).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 2: tiempo en rango, bajo y alto de la población, por día.\n-- Los tres salen de `agregados_diarios`, que el pipeline agrupa por **día local** de cada\n-- lectura con la zona que viaja en su fila (regla 5). Contarlos en UTC haría que una lectura\n-- de las 19:00 en Monterrey cayera en otro día que en el teléfono.\nSELECT\n  periodo                          AS time,\n  AVG(tir)                         AS \"En rango (70-180)\",\n  AVG(tbr)                         AS \"Bajo (< 70)\",\n  AVG(tar)                         AS \"Alto (> 180)\"\nFROM agregados_diarios\nWHERE $__timeFilter(periodo)\nGROUP BY periodo\nORDER BY periodo\n",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Episodios de hipoglucemia, los nocturnos aparte",
+      "description": "Un episodio es una racha por debajo de 70 mg/dL; dos rachas separadas por menos de 15 minutos son el mismo episodio. Nocturno es 00:00-06:00 en hora **local**. No entran las filas interpoladas ni las atípicas: una hipoglucemia inventada por una interpolación es el dato que más alarma de todo el tablero.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 3: episodios de hipoglucemia por día, con los nocturnos aparte.\n--\n-- Un episodio es una **racha** de lecturas por debajo del umbral, y dos rachas separadas por\n-- menos de 15 minutos son el mismo episodio: sin eso, una glucosa que oscila alrededor de 70\n-- se contaría como seis episodios y el panel diría que la noche fue seis veces peor de lo que\n-- fue. Los 15 minutos son la misma constante que usa el pipeline para interpolar huecos.\n--\n-- Se excluyen las filas interpoladas y las atípicas: una hipoglucemia inventada por una\n-- interpolación es la peor clase de dato en este panel, porque es la que más alarma.\n--\n-- Nocturno es la hora **local** de cada fila, con su propia zona, no la UTC: una hipoglucemia\n-- de madrugada es el evento central del proyecto y no puede depender de en qué zona se midió.\nWITH bajas AS (\n  SELECT\n    usuario_uuid,\n    ts_utc,\n    (ts_utc AT TIME ZONE zona_horaria) AS ts_local,\n    ts_utc - LAG(ts_utc) OVER (PARTITION BY usuario_uuid ORDER BY ts_utc) AS hueco\n  FROM serie_limpia\n  WHERE $__timeFilter(ts_utc)\n    AND mg_dl < 70\n    AND NOT interpolada\n    AND NOT atipica\n),\nnumeradas AS (\n  SELECT\n    usuario_uuid,\n    ts_local,\n    SUM(CASE WHEN hueco IS NULL OR hueco > INTERVAL '15 minutes' THEN 1 ELSE 0 END)\n      OVER (PARTITION BY usuario_uuid ORDER BY ts_utc) AS episodio\n  FROM bajas\n),\npor_episodio AS (\n  SELECT usuario_uuid, episodio, MIN(ts_local) AS inicio\n  FROM numeradas\n  GROUP BY usuario_uuid, episodio\n)\nSELECT\n  date_trunc('day', inicio) AS time,\n  CASE WHEN EXTRACT(HOUR FROM inicio) < 6\n       THEN 'Nocturnos (00:00-06:00 local)'\n       ELSE 'Diurnos' END   AS metric,\n  COUNT(*)                  AS value\nFROM por_episodio\nGROUP BY 1, 2\nORDER BY 1, 2\n",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Desempeño del modelo contra la persistencia",
+      "description": "Las dos columnas de RMSE se calculan sobre **las mismas** predicciones. Un RMSE suelto no dice nada: la comparación honesta es contra «dentro de 30 minutos será igual que ahora», y un modelo que no le gana no justifica su existencia. El valor real se busca por tiempo, con 2.5 minutos de tolerancia, no por posición.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MARD %"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 4: desempeño del modelo por versión, **contra la línea base de persistencia**.\n--\n-- El número suelto no dice nada: un RMSE de 18 mg/dL es bueno o malo según con qué se compare.\n-- La persistencia —«dentro de 30 minutos será igual que ahora»— es la comparación honesta, y\n-- un modelo que no le gana no justifica su existencia. Las dos columnas se calculan sobre\n-- **las mismas predicciones**, que es la única forma de que la comparación valga.\n--\n-- El valor real se busca por tiempo y no por posición, con una tolerancia de 2.5 minutos: la\n-- serie trae huecos, y tomar «la fila más cercana que haya» compararía contra un valor de otro\n-- momento sin que nada fallara.\nWITH comparables AS (\n  SELECT\n    p.modelo_version,\n    p.valor_predicho,\n    real.mg_dl   AS valor_real,\n    ahora.mg_dl  AS valor_de_ahora\n  FROM predictions p\n  CROSS JOIN LATERAL (\n    SELECT s.mg_dl\n    FROM serie_limpia s\n    WHERE s.usuario_uuid = p.usuario_uuid\n      AND s.ts_utc BETWEEN p.ts_utc + make_interval(mins => p.horizonte_min) - INTERVAL '2.5 minutes'\n                       AND p.ts_utc + make_interval(mins => p.horizonte_min) + INTERVAL '2.5 minutes'\n    ORDER BY ABS(EXTRACT(EPOCH FROM (s.ts_utc - (p.ts_utc + make_interval(mins => p.horizonte_min)))))\n    LIMIT 1\n  ) AS real\n  CROSS JOIN LATERAL (\n    SELECT s.mg_dl\n    FROM serie_limpia s\n    WHERE s.usuario_uuid = p.usuario_uuid\n      AND s.ts_utc BETWEEN p.ts_utc - INTERVAL '2.5 minutes' AND p.ts_utc + INTERVAL '2.5 minutes'\n    ORDER BY ABS(EXTRACT(EPOCH FROM (s.ts_utc - p.ts_utc)))\n    LIMIT 1\n  ) AS ahora\n  WHERE $__timeFilter(p.ts_utc)\n    AND p.valor_predicho IS NOT NULL\n    AND p.modelo_version IS NOT NULL\n)\nSELECT\n  modelo_version                                                        AS \"Versión\",\n  COUNT(*)                                                              AS \"Predicciones\",\n  ROUND(SQRT(AVG(POWER(valor_predicho - valor_real, 2)))::numeric, 1)   AS \"RMSE del modelo\",\n  ROUND(SQRT(AVG(POWER(valor_de_ahora - valor_real, 2)))::numeric, 1)   AS \"RMSE de la persistencia\",\n  ROUND(AVG(ABS(valor_predicho - valor_real))::numeric, 1)              AS \"MAE del modelo\",\n  ROUND(\n    100.0 * AVG(ABS(valor_predicho - valor_real) / NULLIF(valor_real, 0))::numeric, 1\n  )                                                                     AS \"MARD %\"\nFROM comparables\nGROUP BY 1\nORDER BY 1\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Alertas y falsas alarmas por versión",
+      "description": "La tasa de falsas alarmas es criterio de aceptación del proyecto: **≤ 15 %**. Se calcula solo sobre las alertas con desenlace conocido; contar las desconocidas como acertadas bajaría la tasa sin que nada hubiera mejorado.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% falsas (meta <= 15)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 5: alertas y falsas alarmas por versión del modelo.\n--\n-- La tasa de falsas alarmas es **criterio de aceptación** del proyecto (≤ 15 %): un modelo que\n-- avisa de más se apaga solo, y entonces no avisa el día que importa. Se calcula solo sobre las\n-- alertas cuyo desenlace se conoce (`resulto_real IS NOT NULL`): contar las de desenlace\n-- desconocido como acertadas bajaría la tasa sin que nada hubiera mejorado.\nSELECT\n  p.modelo_version                                               AS \"Versión\",\n  COUNT(*)                                                       AS \"Alertas\",\n  COUNT(*) FILTER (WHERE a.resulto_real IS NOT NULL)             AS \"Con desenlace conocido\",\n  COUNT(*) FILTER (WHERE a.resulto_real IS FALSE)                AS \"Falsas alarmas\",\n  ROUND(\n    100.0 * COUNT(*) FILTER (WHERE a.resulto_real IS FALSE)\n    / NULLIF(COUNT(*) FILTER (WHERE a.resulto_real IS NOT NULL), 0), 1\n  )                                                              AS \"% falsas (meta <= 15)\",\n  COUNT(*) FILTER (WHERE a.ts_respuesta IS NOT NULL)             AS \"Respondidas\",\n  ROUND(AVG(\n    EXTRACT(EPOCH FROM (a.ts_respuesta - a.ts_emision)) / 60\n  ) FILTER (WHERE a.ts_respuesta IS NOT NULL)::numeric, 1)       AS \"Minutos medios en responder\"\nFROM alerts a\nJOIN predictions p ON p.uuid = a.prediccion_uuid\nWHERE $__timeFilter(a.ts_emision)\nGROUP BY 1\nORDER BY 1\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Qué hay en la cuarentena",
+      "description": "RF-22 obliga a conservar lo rechazado con su motivo, y para esto sirve: un motivo que se repite mil veces es un error de la app, no mil datos malos. Nada se descarta en silencio.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 6a: qué hay en la cuarentena, por tabla y por motivo.\n-- RF-22 obliga a conservar lo rechazado con su motivo, y este panel es para qué sirve: un\n-- motivo que se repite mil veces es un error de la app, no mil datos malos.\nSELECT\n  tabla_destino     AS \"Tabla\",\n  motivo_rechazo    AS \"Motivo\",\n  COUNT(*)          AS \"Renglones\",\n  MAX(ts_recepcion) AS \"El más reciente\"\nFROM cuarentena\nWHERE $__timeFilter(ts_recepcion)\nGROUP BY 1, 2\nORDER BY 3 DESC\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Salud de la cola hacia el Learning Record Store",
+      "description": "«Pendiente» es exactamente «sin enviar y sin rechazar» (C-12). Lo que hay que mirar no es el número de pendientes, que sube y baja, sino **la más antigua**: una cola que se vacía con tres días de retraso funciona y a la vez está mal, y es lo único que delata un LRS apagado desde el martes.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 6b: salud de la cola hacia el Learning Record Store.\n--\n-- «Pendiente» es exactamente «sin enviar y sin rechazar» (C-12). Lo que hay que mirar no es el\n-- número de pendientes, que sube y baja, sino **la más antigua**: una cola que se vacía con\n-- tres días de retraso funciona y a la vez está mal, y es lo único que delata un LRS que lleva\n-- apagado desde el martes.\nSELECT\n  COUNT(*) FILTER (WHERE enviado_ts IS NULL AND motivo_rechazo IS NULL)  AS \"Pendientes\",\n  COUNT(*) FILTER (WHERE enviado_ts IS NOT NULL)                         AS \"Enviadas\",\n  COUNT(*) FILTER (WHERE motivo_rechazo IS NOT NULL)                     AS \"Rechazadas\",\n  MIN(ts_utc) FILTER (WHERE enviado_ts IS NULL AND motivo_rechazo IS NULL)\n                                                                         AS \"La pendiente más antigua\",\n  ROUND(AVG(\n    EXTRACT(EPOCH FROM (enviado_ts - ts_utc)) / 60\n  ) FILTER (WHERE enviado_ts IS NOT NULL)::numeric, 1)                   AS \"Minutos medios en salir\",\n  ROUND(AVG(intentos)::numeric, 2)                                       AS \"Intentos medios\"\nFROM xapi_events\nWHERE $__timeFilter(ts_utc)\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Sentencias xAPI por verbo",
+      "description": "Actividad registrada en el Learning Record Store. Tres de los seis verbos no están en el perfil de ADL y usan vocabulario propio o de Activity Streams; está dicho en `docs/fase6-paso-1-learning-record-store.md` y fijado con una prueba.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 31,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 7a: sentencias xAPI por día y por verbo.\nSELECT\n  date_trunc('day', ts_utc) AS time,\n  verbo                     AS metric,\n  COUNT(*)                  AS value\nFROM xapi_events\nWHERE $__timeFilter(ts_utc)\nGROUP BY 1, 2\nORDER BY 1, 2\n",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Indicadores de aprendizaje",
+      "description": "Contar sentencias es actividad; lo que dice algo de autocuidado es la **proporción**: de los avisos que recibió, a cuántos respondió, y de los módulos que abrió, cuántos terminó. Esas dos son las que van al reporte.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% de respuesta"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "% terminados"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 7b: los dos indicadores que de verdad dicen algo de autocuidado.\n--\n-- Contar sentencias por verbo es un número de actividad; lo que importa es la **proporción**:\n-- de los avisos que recibió, a cuántos respondió, y de los módulos que abrió, cuántos terminó.\n-- Esas dos son las que van al reporte.\nSELECT\n  COUNT(*) FILTER (WHERE verbo = 'received')   AS \"Avisos recibidos\",\n  COUNT(*) FILTER (WHERE verbo = 'responded')  AS \"Avisos respondidos\",\n  ROUND(\n    100.0 * COUNT(*) FILTER (WHERE verbo = 'responded')\n    / NULLIF(COUNT(*) FILTER (WHERE verbo = 'received'), 0), 1\n  )                                            AS \"% de respuesta\",\n  COUNT(*) FILTER (WHERE verbo = 'launched')   AS \"Módulos abiertos\",\n  COUNT(*) FILTER (WHERE verbo = 'completed')  AS \"Módulos terminados\",\n  ROUND(\n    100.0 * COUNT(*) FILTER (WHERE verbo = 'completed')\n    / NULLIF(COUNT(*) FILTER (WHERE verbo = 'launched'), 0), 1\n  )                                            AS \"% terminados\",\n  COUNT(*) FILTER (WHERE verbo = 'answered')   AS \"Evaluaciones contestadas\"\nFROM xapi_events\nWHERE $__timeFilter(ts_utc)\n",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Explicaciones: del modelo o de la plantilla",
+      "description": "La plantilla determinista no es un plan de emergencia: es el piso de la función (P-13), y este panel dice cada cuánto se pisa. La bitácora guarda cuál de las dos contestó y cuánto tardó, **no el texto de la explicación ni un solo valor de glucosa** (C-13).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 8a: cuántas explicaciones salieron del modelo y cuántas de la plantilla, por día.\n--\n-- Es la cifra que hace creíble al componente de IA generativa. La plantilla determinista no es\n-- un plan de emergencia: es el piso de la función, y este panel dice cada cuánto se pisa.\nSELECT\n  date_trunc('day', ts_utc)                        AS time,\n  COUNT(*) FILTER (WHERE origen = 'modelo')        AS \"Del modelo de lenguaje\",\n  COUNT(*) FILTER (WHERE origen = 'plantilla')     AS \"De la plantilla determinista\"\nFROM explicaciones\nWHERE $__timeFilter(ts_utc)\nGROUP BY 1\nORDER BY 1\n",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Por qué salió la plantilla, y cuánto tarda cada camino",
+      "description": "Los motivos no son equivalentes. `sin_asistente` es la persona que lo apagó y está bien. `sin_respuesta` es Ollama apagado o pasado de los diez segundos. `cifra_inventada` y `patron_de_dosificacion` son el modelo portándose mal, y son los dos que hay que mirar: es la validación de la regla 7 haciendo su trabajo.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "glucy-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 12,
+        "h": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ms medios"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ms peor caso"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "glucy-postgres"
+          },
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Panel 8b: por qué salió la plantilla, y cuánto tarda cada camino.\n--\n-- Los motivos no son equivalentes y por eso se desglosan: `sin_asistente` es la persona que lo\n-- apagó y está bien; `sin_respuesta` es la computadora de Ollama apagada o pasada de los diez\n-- segundos; `cifra_inventada` y `patron_de_dosificacion` son el modelo portándose mal, y son\n-- los dos que hay que mirar, porque es la validación de la regla 7 haciendo su trabajo.\nSELECT\n  origen                              AS \"Origen\",\n  COALESCE(motivo, '—')               AS \"Motivo\",\n  COUNT(*)                            AS \"Veces\",\n  ROUND(AVG(duracion_ms)::numeric, 0) AS \"ms medios\",\n  MAX(duracion_ms)                    AS \"ms peor caso\"\nFROM explicaciones\nWHERE $__timeFilter(ts_utc)\nGROUP BY 1, 2\nORDER BY 3 DESC\n",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

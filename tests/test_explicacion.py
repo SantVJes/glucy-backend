@@ -22,7 +22,7 @@ from app.services.explicacion.prompt import SISTEMA, mensaje_de_usuario
 from app.services.explicacion.servicio import explicar, vaciar_cache
 from app.services.explicacion.validacion import numeros, revisar
 from referencia.reglas_clinicas import plantilla_explicacion
-from tests.conftest import cabeceras
+from tests.conftest import USUARIO, cabeceras
 
 PETICION = {
     "valor_actual": 112,
@@ -205,9 +205,7 @@ def test_88_p13_si_no_contesta_a_tiempo_sale_la_plantilla(
     assert cuerpo["motivo"] == "sin_respuesta"
 
 
-def test_89_si_contesta_un_error_sale_la_plantilla(
-    cliente: TestClient, ollama_falso: type[_Falso]
-):
+def test_89_si_contesta_un_error_sale_la_plantilla(cliente: TestClient, ollama_falso: type[_Falso]):
     ollama_falso.estado = 500
     _con_ollama(cliente, ollama_falso.url)  # type: ignore[attr-defined]
     cuerpo = cliente.post("/explain", json=PETICION, headers=cabeceras()).json()
@@ -326,3 +324,76 @@ def test_99_el_servicio_no_llama_a_nadie_sin_url():
     respuesta = explicar(_entrada(), None, "qwen3:8b", 10.0)
     assert respuesta.origen == "plantilla"
     assert respuesta.motivo == "sin_asistente"
+
+
+# --- La bitácora del paso 2 de la fase 6 (C-13) -----------------------------------------------
+
+
+def _bitacora(sesion):
+    from sqlalchemy import select
+
+    from app.models.tablas import Explicacion
+
+    sesion.expire_all()
+    return list(sesion.scalars(select(Explicacion)))
+
+
+def test_cada_explicacion_deja_una_fila_con_de_donde_salio(cliente: TestClient, sesion):
+    """Sin esto, el reporte no puede decir cuántas veces contestó el modelo de lenguaje."""
+    _con_ollama(cliente, None)
+    cliente.post("/explain", json=PETICION, headers=cabeceras())
+    [fila] = _bitacora(sesion)
+    assert fila.origen == "plantilla"
+    assert fila.motivo == "sin_asistente" or fila.motivo is not None
+    assert fila.horizonte_min == 30
+    assert fila.modo == "sensor"
+    assert fila.duracion_ms >= 0
+
+
+def test_la_bitacora_dice_cuando_contesto_el_modelo(cliente: TestClient, sesion, ollama_falso):
+    _con_ollama(cliente, ollama_falso.url)
+    peticion = {**PETICION, "asistente_activo": True}
+    cliente.post("/explain", json=peticion, headers=cabeceras())
+    [fila] = _bitacora(sesion)
+    assert fila.origen == "modelo"
+    assert fila.motivo is None
+    assert fila.modelo
+
+
+def test_la_bitacora_no_guarda_el_texto_ni_ninguna_cifra_de_glucosa(cliente: TestClient, sesion):
+    """Guardar la explicación sería guardar una frase sobre la glucosa de alguien en una tabla
+    de diagnóstico, y el texto no hace falta para contar cuántas veces contestó el modelo.
+    """
+    _con_ollama(cliente, None)
+    cliente.post("/explain", json=PETICION, headers=cabeceras())
+    [fila] = _bitacora(sesion)
+    columnas = {c.name for c in fila.__table__.columns}
+    assert "explicacion" not in columnas
+    assert "prompt" not in columnas
+    guardado = " ".join(str(getattr(fila, c)) for c in columnas)
+    assert "112" not in guardado  # el valor actual de la petición
+    assert "74" not in guardado  # el valor predicho
+
+
+def test_el_usuario_nace_en_su_primer_contacto_aunque_solo_pida_una_explicacion(
+    cliente: TestClient, sesion
+):
+    """`explicaciones.usuario_uuid` es llave ajena: sin esto, la primera explicación de alguien
+    que no ha subido nada reventaría en PostgreSQL y en SQLite no, que es lo peor de los dos.
+    """
+    from sqlalchemy import select
+
+    from app.models.tablas import Usuario
+
+    _con_ollama(cliente, None)
+    cliente.post("/explain", json=PETICION, headers=cabeceras())
+    sesion.expire_all()
+    assert [u.uuid for u in sesion.scalars(select(Usuario))] == [USUARIO]
+
+
+def test_dos_explicaciones_dejan_dos_filas(cliente: TestClient, sesion):
+    """La caché devuelve la misma explicación, pero la petición ocurrió dos veces."""
+    _con_ollama(cliente, None)
+    cliente.post("/explain", json=PETICION, headers=cabeceras())
+    cliente.post("/explain", json=PETICION, headers=cabeceras())
+    assert len(_bitacora(sesion)) == 2

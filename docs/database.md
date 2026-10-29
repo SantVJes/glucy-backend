@@ -253,6 +253,37 @@ crudo, que es del teléfono (regla 1).
   diarios agrupan por día local con la zona de cada fila (prueba 76), y la regla 5 obliga a
   guardar la zona junto al `ts_utc`.
 
+### La tabla catorce: `explicaciones` (C-13)
+
+**Tampoco está en el Documento 3, y también hay que decirlo en el reporte.** El panel 8 del
+tablero (§10 del Documento 2) tiene que enseñar cuántas explicaciones salieron del modelo de
+lenguaje, cuántas de la plantilla determinista y cuánto tardó cada camino. Ninguna de las trece
+tablas anteriores lo sabía: la explicación se armaba, se devolvía y no dejaba rastro, así que ese
+panel no tenía de dónde leer.
+
+| Columna | Tipo | Nula | Nota |
+| --- | --- | --- | --- |
+| `id` | entero | no | PK autoincremental; la fila no viene del teléfono y no tiene UUID |
+| `ts_utc` | fecha y hora | no | cuándo se pidió la explicación, en UTC |
+| `usuario_uuid` | UUID | no | FK a `usuarios.uuid`. Lo único que identifica, y es seudónimo |
+| `origen` | texto | no | `modelo` o `plantilla` |
+| `motivo` | texto | sí | por qué salió la plantilla; nulo cuando contestó el modelo |
+| `modelo` | texto | sí | qué modelo contestó, p. ej. `qwen3:8b`; nulo con la plantilla |
+| `duracion_ms` | entero | no | cuánto tardó el camino que contestó |
+| `horizonte_min` | entero | no | 30 o 60 |
+| `modo` | texto | no | `sensor` o `sin_sensor` |
+
+**Lo que esta tabla NO guarda, que es la decisión entera:** ni el prompt, ni el texto de la
+explicación, ni un solo valor de glucosa, ni las contribuciones SHAP. Guardar el texto
+convertiría una bitácora de operación en un historial clínico, y un historial clínico en una
+tabla que mira un panel es exactamente lo que la regla 3 no quiere. Con nueve columnas se
+contestan las dos preguntas del panel —¿contestó el modelo? ¿cuánto tardó?— y ninguna más.
+
+Los cuatro motivos, que no son equivalentes y por eso se desglosan en el panel:
+`sin_asistente` (la persona lo apagó, y está bien), `sin_respuesta` (Ollama apagado o pasado de
+los diez segundos, P-13), `cifra_inventada` y `patron_de_dosificacion` (el modelo portándose mal:
+es la validación de la regla 7 haciendo su trabajo, y son los dos que hay que mirar).
+
 ## Grupo C, lo que nunca sale del teléfono
 
 Nombre y apellidos, peso, notas de texto libre, fotografías y la caché de productos. Ninguna
