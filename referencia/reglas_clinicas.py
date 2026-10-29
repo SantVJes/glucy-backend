@@ -535,12 +535,28 @@ def plantilla_explicacion(valor_actual: float, valor_predicho: float,
     la validación, cuando la computadora del backend está apagada y cuando la persona
     desactivó el asistente. Es menos natural de leer, pero es determinista, no cuesta nada
     y funciona sin internet. Nunca sugiere una dosis.
+
+    **La dirección y las contribuciones se dicen por separado, y es la corrección C-15.**
+    Antes decía «sube sobre todo POR X (-29 mg/dL)», y eso se lee como una contradicción: no
+    se entiende que algo que resta haga subir. Y no era un problema de redacción: la dirección
+    compara el valor predicho con el actual, mientras que una contribución SHAP se mide contra
+    el valor base del modelo, no contra el de ahora. Son dos referencias distintas, así que la
+    palabra «por» unía dos cosas que no se pueden unir. Ahora se enuncia la dirección y luego
+    **lo que más pesó**, que es lo que SHAP de verdad dice, con su signo a la vista.
+
+    Esta plantilla es el piso de la función de explicación —lo único que se promete que
+    funciona con todo lo demás apagado—, así que no puede producir una frase que se contradice.
     """
-    direccion = "baja" if valor_predicho < valor_actual else "sube"
+    if valor_predicho < valor_actual:
+        direccion = "Vas a bajar."
+    elif valor_predicho > valor_actual:
+        direccion = "Vas a subir."
+    else:
+        direccion = "Te mantienes igual."
     principales = sorted(shap, key=lambda kv: abs(kv[1]), reverse=True)[:2]
     partes = [f"{nombre} ({valor:+.0f} mg/dL)" for nombre, valor in principales]
-    motivos = " y por ".join(partes) if partes else "los datos de las últimas horas"
+    motivos = " y ".join(partes) if partes else "los datos de las últimas horas"
     return (
-        f"{direccion.capitalize()} sobre todo por {motivos}. "
+        f"{direccion} Lo que más pesa en la estimación: {motivos}. "
         "Es una estimación: conviene confirmar con una medición antes de actuar."
     )
