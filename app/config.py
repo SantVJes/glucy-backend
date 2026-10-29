@@ -29,6 +29,10 @@ class Ajustes(BaseSettings):
     ollama_modelo: str = "qwen3:8b"
     explicacion_timeout_s: float = TIMEOUT_MODELO_LENGUAJE_S
 
+    # La carpeta con los artefactos del modelo y sus manifiestos (paso 5). Vacía = sin modelo,
+    # y `/predict` contesta 503 en lugar de inventar un número.
+    ruta_artefacto_modelo: str = ""
+
 
 @lru_cache
 def ajustes() -> Ajustes:

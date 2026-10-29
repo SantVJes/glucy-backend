@@ -8,7 +8,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import ajustes
-from app.routers import explain, history, insulin, meals, perfil, readings, stats
+from app.routers import (
+    explain,
+    history,
+    insulin,
+    meals,
+    perfil,
+    predict,
+    readings,
+    stats,
+)
+from app.services.prediccion.artefacto import cargar
 
 VERSION = "0.1.0"
 
@@ -57,3 +67,9 @@ app.include_router(perfil.router)
 app.include_router(history.router)
 app.include_router(stats.router)
 app.include_router(explain.router)
+app.include_router(predict.router)
+
+# El artefacto del modelo se carga una vez, al arrancar, y vive en el estado de la aplicación:
+# por eso `GET /predict` entra en los 200 ms (RF-21). Sin artefacto la API arranca igual y ese
+# endpoint contesta 503, porque subir lecturas no necesita el modelo (regla 1).
+app.state.artefactos = cargar(ajustes().ruta_artefacto_modelo)

@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, ForeignKey
+from sqlalchemy import JSON, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.models.tipos import FechaUtc
@@ -133,9 +133,23 @@ class EventoContexto(Base):
 
 
 class Prediccion(Base):
-    """De esta tabla el backend es la autoridad, no el teléfono."""
+    """De esta tabla el backend es la autoridad, no el teléfono.
+
+    El `uuid` es la llave primaria pero no identifica nada: lo genera el servidor en cada
+    respuesta. La llave natural —usuario, instante, horizonte y versión del modelo— es un índice
+    único aparte (migración `0003`), y es lo que hace idempotente a `GET /predict`.
+    """
 
     __tablename__ = "predictions"
+    __table_args__ = (
+        UniqueConstraint(
+            "usuario_uuid",
+            "ts_utc",
+            "horizonte_min",
+            "modelo_version",
+            name="ix_predictions_llave_natural",
+        ),
+    )
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
     usuario_uuid: Mapped[UUID] = mapped_column(ForeignKey("usuarios.uuid"), index=True)
