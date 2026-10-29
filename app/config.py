@@ -33,6 +33,15 @@ class Ajustes(BaseSettings):
     # y `/predict` contesta 503 en lugar de inventar un número.
     ruta_artefacto_modelo: str = ""
 
+    # El Learning Record Store de la fase 6 (Learning Locker). **Sin URL no se manda nada y las
+    # sentencias se quedan en la cola**: el LRS es para analítica de aprendizaje y ninguna
+    # función de la app depende de que esté encendido (RF-19, RF-33). Los nombres de las tres
+    # variables son los que ya estaban en `.env.example`.
+    lrs_url: str = ""
+    lrs_usuario: str = ""
+    lrs_secreto: str = ""
+    lrs_timeout_s: float = 10.0
+
 
 @lru_cache
 def ajustes() -> Ajustes:

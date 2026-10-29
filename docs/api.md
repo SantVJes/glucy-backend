@@ -14,8 +14,9 @@ en `/docs`.
 | `/explain` | POST | explicación en lenguaje natural | **fase 2, paso 6** |
 | `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | **fase 2, paso 3** |
 | `/history` | GET | histórico para el panel y la exportación | **fase 2, paso 3** |
+| `/xapi` | POST | lote de eventos de aprendizaje (xAPI) | **fase 6, paso 1** |
 
-**Son ocho, no siete, y es a propósito.** Los parámetros clínicos del perfil —los umbrales y la
+Con el de la fase 6 son nueve. **Los de la fase 2 son ocho y no siete, y es a propósito.** Los parámetros clínicos del perfil —los umbrales y la
 duración de acción de la insulina, que el pipeline necesita para el IOB y para derivar la
 alerta— no tenían por dónde llegar (C-7). Van en su propio endpoint, con solo esos seis campos,
 en lugar de esconderse en `/readings`.
@@ -787,4 +788,146 @@ curl -s localhost:8000/explain -H "Authorization: Bearer $T" \
     "valor_actual": 112, "valor_predicho": 74, "horizonte_min": 30, "modo": "sensor",
     "umbral_hipo": 70, "umbral_hiper": 180, "cob_g": 12, "iob_ui": 2.5, "hora_local": 3,
     "shap": [{"variable": "insulina que sigue activa", "mg_dl": -20}]}'
+```
+
+---
+
+## `POST /xapi`
+
+Un lote de la `ColaXapi` del teléfono: los hechos de autocuidado y de aprendizaje que van al
+Learning Record Store (RF-19, RF-33). Mismo sobre y misma respuesta en tres listas que los tres
+lotes clínicos.
+
+**El teléfono no manda una sentencia xAPI.** Manda un verbo, una actividad y hasta tres números;
+el actor, el objeto y el resultado los arma el servidor. Con eso **no hay ningún campo de texto
+libre** por el que algo pudiera salir del teléfono (regla 3), y el cliente no tiene que saber
+nada de xAPI.
+
+### Petición
+
+```json
+{
+  "items": [
+    {
+      "uuid": "6f3a1b2c-0000-4000-8000-000000000001",
+      "ts_utc": "2026-10-28T11:00:00Z",
+      "verbo": "experienced",
+      "actividad": "registro-de-glucosa"
+    },
+    {
+      "uuid": "6f3a1b2c-0000-4000-8000-000000000002",
+      "ts_utc": "2026-10-28T11:20:00Z",
+      "verbo": "answered",
+      "actividad": "evaluacion",
+      "exito": true,
+      "puntaje": 0.75,
+      "duracion_s": 42.5
+    }
+  ]
+}
+```
+
+| Campo | Obligatorio | Qué es |
+| --- | --- | --- |
+| `uuid` | sí | el que generó el teléfono. Es también el `id` de la sentencia en el LRS |
+| `ts_utc` | sí | ISO 8601 **con offset**, y no futura |
+| `verbo` | sí | uno de los seis de abajo |
+| `actividad` | sí | una de las seis, y tiene que ir con el verbo |
+| `exito` | no | el `result.success` de xAPI |
+| `puntaje` | no | el `result.score.scaled`, de 0 a 1. Solo con `answered` y `completed` |
+| `duracion_s` | no | segundos; sale como duración ISO 8601 (`PT42.50S`) |
+
+### El vocabulario
+
+| Verbo | Con qué actividad | IRI | ¿En el perfil de ADL? |
+| --- | --- | --- | --- |
+| `experienced` | `registro-de-glucosa`, `registro-de-comida`, `registro-de-insulina` | `http://adlnet.gov/expapi/verbs/experienced` | sí |
+| `received` | `alerta-de-hipoglucemia` | `http://activitystrea.ms/schema/1.0/receive` | **no** |
+| `responded` | `alerta-de-hipoglucemia` | `http://adlnet.gov/expapi/verbs/responded` | **no** |
+| `launched` | `modulo-educativo` | `http://adlnet.gov/expapi/verbs/launched` | sí |
+| `completed` | `modulo-educativo` | `http://adlnet.gov/expapi/verbs/completed` | **no** |
+| `answered` | `evaluacion` | `http://adlnet.gov/expapi/verbs/answered` | sí |
+
+La última columna sale de cotejar los seis contra `adl/adl.jsonld` de
+`adlnet/xapi-authored-profiles` el 29/10/2026. Los tres que salen en falso son válidos —xAPI deja
+crear vocabulario— pero **el reporte tiene que decirlo** en lugar de escribir «xAPI 1.0.3» y
+dejarlo pasar. Hay una prueba que fija el cotejo.
+
+### Respuesta
+
+Igual que los lotes clínicos, y **no dice nada del LRS**:
+
+```json
+{"aceptados": ["6f3a…01"], "duplicados": [], "cuarentena": []}
+```
+
+Un renglón sale de la cola del teléfono cuando **este servidor** lo acepta. Mandarlo al Learning
+Record Store es cosa del servidor y pasa después, en su propia ventana. Si la respuesta
+dependiera de que el LRS contestara, una caída del LRS dejaría al teléfono reintentando, y la
+regla de que ninguna función depende de él se habría roto en el primer endpoint.
+
+### Qué va a cuarentena, y en qué orden se comprueba
+
+1. El esquema del renglón. Un `actor`, un `objeto`, un `resultado` o una `nota` de más es
+   cuarentena con un motivo que dice que esos los arma el servidor (regla 3).
+2. `usuario_uuid` en el cuerpo distinto del token.
+3. Marca de tiempo futura.
+4. El verbo no va con la actividad (`answered` sobre una medición de glucosa).
+5. `puntaje` en un verbo que no puntúa nada.
+
+**De un renglón rechazado se guardan el `uuid` y la hora, y de lo demás solo el nombre de la
+clave.** Es más estricto que en los lotes clínicos, donde la carga son números y enums: aquí
+cualquier campo podría traer texto, y la tabla de diagnóstico no debe ser la puerta de atrás por
+la que entra una nota. Se pierde detalle para diagnosticar y se gana eso.
+
+### Lo que la sentencia **no** lleva
+
+Ni una cifra clínica. Dice que la persona registró una medición, no cuánto marcó; que recibió un
+aviso de glucosa baja, no de cuántos mg/dL. Para los indicadores de autocuidado alcanza —lo que
+se quiere saber es si registra y si responde a los avisos— y le quita al LRS, que es un servidor
+de terceros con su propia base, cualquier razón para contener datos de salud. Hay una prueba que
+lo comprueba.
+
+El actor es una cuenta con el UUID seudónimo:
+
+```json
+{"objectType": "Agent",
+ "account": {"homePage": "https://github.com/SantVJes/glucy-backend/xapi/usuarios",
+             "name": "11111111-1111-1111-1111-111111111111"}}
+```
+
+Sin `mbox`, que es lo primero que aparece en los ejemplos de xAPI y aquí sería la fuga completa.
+
+### La ventana de envío
+
+```bash
+python -m app.lrs              # manda lo que esté pendiente
+python -m app.lrs --cuantas    # solo dice cuántas esperan
+```
+
+Se programa con `cron`, igual que el pipeline. **Si el LRS no está, la orden termina bien, no
+toca ninguna fila y dice por qué no mandó nada**: una caída del LRS no es una falla del sistema,
+y por eso no devuelve un código de error que un `cron` reportaría todas las noches.
+
+### Configuración
+
+```
+GLUCY_LRS_URL=               # vacío = no se manda nada y todo espera en la cola
+GLUCY_LRS_USUARIO=           # la clave del cliente de Learning Locker
+GLUCY_LRS_SECRETO=           # su secreto
+GLUCY_LRS_TIMEOUT_S=10
+```
+
+### Prueba a mano
+
+```bash
+T=$(python scripts/token-de-prueba.py 11111111-1111-1111-1111-111111111111)
+curl -s localhost:8000/xapi -H "Authorization: Bearer $T" \
+  -H 'Content-Type: application/json' -d '{"items":[{
+    "uuid":"6f3a1b2c-0000-4000-8000-000000000001",
+    "ts_utc":"2026-10-28T11:00:00Z","verbo":"experienced",
+    "actividad":"registro-de-glucosa"}]}'
+# {"aceptados":["6f3a1b2c-0000-4000-8000-000000000001"],"duplicados":[],"cuarentena":[]}
+
+# con "actor":{"mbox":"mailto:…"} en el renglón, el mismo comando lo manda a cuarentena
 ```
