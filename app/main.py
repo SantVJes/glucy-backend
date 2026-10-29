@@ -17,6 +17,7 @@ from app.routers import (
     predict,
     readings,
     stats,
+    xapi,
 )
 from app.services.prediccion.artefacto import cargar
 
@@ -68,6 +69,7 @@ app.include_router(history.router)
 app.include_router(stats.router)
 app.include_router(explain.router)
 app.include_router(predict.router)
+app.include_router(xapi.router)
 
 # El artefacto del modelo se carga una vez, al arrancar, y vive en el estado de la aplicación:
 # por eso `GET /predict` entra en los 200 ms (RF-21). Sin artefacto la API arranca igual y ese

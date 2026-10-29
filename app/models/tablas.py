@@ -219,6 +219,15 @@ class AgregadoDiario(_ColumnasAgregado, Base):
 
 
 class EventoXapi(Base):
+    """Una sentencia xAPI y su estado de envío al Learning Record Store (RF-19, RF-33).
+
+    Las cuatro columnas JSON guardan **lo que se le mandó al LRS**, ya armado, y no los campos
+    que llegaron del teléfono: así la fila es el rastro de la sentencia que de verdad salió.
+
+    Las tres últimas columnas no están en el Documento 3 y son lo que hace de esta tabla una
+    cola; queda anotado como C-12 (migración `0004`).
+    """
+
     __tablename__ = "xapi_events"
 
     uuid: Mapped[UUID] = mapped_column(primary_key=True)
@@ -228,6 +237,11 @@ class EventoXapi(Base):
     verbo: Mapped[str | None]
     objeto: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     resultado: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    # C-12: el estado de la cola. Está pendiente mientras las dos primeras sean nulas.
+    enviado_ts: Mapped[datetime | None] = mapped_column(FechaUtc, default=None)
+    motivo_rechazo: Mapped[str | None] = mapped_column(default=None)
+    intentos: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 # ---------------------------------------------------------------------------

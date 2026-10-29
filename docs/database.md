@@ -82,7 +82,7 @@ Flujo en un solo sentido por tipo de dato: nunca compiten dos autoridades por el
 | `agregados_horarios` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
 | `agregados_diarios` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
 | `serie_limpia` | backend | pipeline (`python -m app.pipeline`) | paso 4 |
-| `xapi_events` | backend | registro para Learning Locker | por definir |
+| `xapi_events` | **teléfono**, por `POST /xapi` | registro para Learning Locker, y la cola de envío | verbo, actividad y hasta tres números (fase 6) |
 
 ### Las que usan los pasos 1 y 2
 
@@ -216,7 +216,16 @@ paso las llene.
   SQL, una cuarta implementación de las reglas clínicas sin nada que la compare contra la
   referencia (decisión 2.6 del paso 4). Detalle en `docs/pipeline.md`.
 - **`xapi_events`**: `uuid` (PK), `usuario_uuid` (FK), `ts_utc`, `actor`, `verbo`, `objeto`,
-  `resultado` (los tres últimos en JSON, como los define xAPI 1.0.3).
+  `resultado` (los tres últimos en JSON, como los define xAPI 1.0.3), más tres columnas de
+  estado que **no están en el Documento 3** y son las que la vuelven una cola (C-12, migración
+  `0004`): `enviado_ts`, `motivo_rechazo` e `intentos`. Una sentencia **está en la cola cuando
+  las dos primeras son nulas**, y de ahí sale la propiedad que pide RF-19: con el LRS caído no
+  se toca ninguna fila, así que una caída de una semana no gasta reintentos.
+
+  Las cuatro columnas JSON guardan **lo que se le mandó al LRS**, ya armado, y no los campos que
+  llegaron del teléfono: la fila es el rastro de la sentencia que de verdad salió. Si se
+  guardaran los campos de entrada y la sentencia se armara al enviar, dos versiones del
+  servicio mandarían sentencias distintas desde la misma fila y no quedaría rastro de cuál.
 
 ### La tabla trece: `serie_limpia` (C-9)
 
