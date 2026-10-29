@@ -214,6 +214,58 @@ def test_clarke_no_confunde_un_error_grande_en_zona_alta_con_uno_peligroso():
     assert zona_clarke(70, 100) == "D"
 
 
+def test_clarke_sobrecorregir_es_zona_c_hasta_290_y_no_hasta_180():
+    """Real 200 con predicho 320 es C, no B.
+
+    Primera de las tres familias del cotejo del 29/10/2026: la zona C llega hasta 290 mg/dL.
+    Con el corte en 180, 28 105 pares caían en B, y B cuenta para el A+B que el proyecto
+    promete en >= 95 %.
+    """
+    assert zona_clarke(200, 320) == "C"
+    assert zona_clarke(181, 291) == "C"
+
+
+def test_clarke_el_limite_de_la_zona_d_es_inclusivo():
+    """Real 300 con predicho exactamente 180 es D, no B.
+
+    Segunda familia: 361 pares, y es un `<` donde va un `<=`. No se ve leyendo el código.
+    """
+    assert zona_clarke(300, 180) == "D"
+    assert zona_clarke(240, 180) == "D"
+
+
+def test_clarke_una_hipoglucemia_no_detectada_sigue_siendo_zona_d():
+    """Real 60 con predicho 120 es D.
+
+    Tercera familia, y la única donde esta implementación ya era la correcta: el puerto
+    público dice B para 1 224 pares con reales de 59 a 70. Esta prueba existe para que la
+    corrección de las otras dos no se lleve esta de paso, porque es el evento central del
+    proyecto.
+    """
+    assert zona_clarke(60, 120) == "D"
+    assert zona_clarke(59, 71) == "D"
+
+
+def test_clarke_da_lo_mismo_que_glucy_ml():
+    """Las dos implementaciones coinciden en los nueve casos que fijan las tres familias.
+
+    No se puede importar `glucy-ml` desde aquí, así que lo que se fija son los valores. Si
+    una de las dos cambia, una de las dos suites lo dice.
+    """
+    esperado = {
+        (100, 110): "A",
+        (60, 65): "A",
+        (60, 200): "E",
+        (200, 60): "E",
+        (200, 320): "C",
+        (300, 180): "D",
+        (60, 120): "D",
+        (150, 200): "B",
+        (70, 100): "D",
+    }
+    assert {par: zona_clarke(*par) for par in esperado} == esperado
+
+
 def test_porcentaje_clarke_ab():
     reales = [100, 120, 60, 200]
     predichos = [105, 130, 65, 210]
