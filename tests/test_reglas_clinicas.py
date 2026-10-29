@@ -41,7 +41,6 @@ AHORA = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 
 # --- Validación -------------------------------------------------------------
 
-
 def test_P01_ocr_sin_confirmar_no_se_guarda():
     """P-01: el OCR lee con alta confianza y el usuario no confirma → no se guarda nada.
     No existe umbral que decida por el usuario (D-11)."""
@@ -84,7 +83,6 @@ def test_interpolacion_solo_hasta_15_minutos_y_solo_en_sensor():
 
 # --- COB --------------------------------------------------------------------
 
-
 def test_P11_cob_60g_180min_a_los_90min_son_30g():
     """P-11, el caso escrito en el reporte."""
     assert cob(60, 90, 180) == pytest.approx(30.0)
@@ -115,10 +113,9 @@ def test_cob_total_suma_varias_comidas_y_no_inventa_ninguna():
 
 # --- IOB --------------------------------------------------------------------
 
-
 def test_iob_empieza_completa_y_termina_en_cero():
     assert fraccion_insulina_activa(0) == 1.0
-    assert fraccion_insulina_activa(300) == 0.0  # DIA de 5 h
+    assert fraccion_insulina_activa(300) == 0.0   # DIA de 5 h
     assert fraccion_insulina_activa(999) == 0.0
 
 
@@ -146,13 +143,12 @@ def test_iob_suma_varias_dosis():
 
 # --- Indicadores ------------------------------------------------------------
 
-
 def test_gmi_y_tir():
     ind = indicadores([70, 100, 180, 200, 50])
     assert ind.promedio == pytest.approx(120.0)
-    assert ind.tir == pytest.approx(60.0)  # 70, 100 y 180 están en 70-180
-    assert ind.tbr == pytest.approx(20.0)  # 50 está por debajo de 70
-    assert ind.tar == pytest.approx(20.0)  # 200 está por encima de 180
+    assert ind.tir == pytest.approx(60.0)      # 70, 100 y 180 están en 70-180
+    assert ind.tbr == pytest.approx(20.0)      # 50 está por debajo de 70
+    assert ind.tar == pytest.approx(20.0)      # 200 está por encima de 180
     assert ind.gmi == pytest.approx(3.31 + 0.02392 * 120)
 
 
@@ -161,9 +157,9 @@ def test_los_umbrales_del_perfil_mueven_tbr_y_tar_pero_no_el_tir():
     por_omision = indicadores(valores)
     assert por_omision.tbr == 0.0 and por_omision.tar == 0.0
     ajustados = indicadores(valores, umbral_hipo=90, umbral_hiper=140)
-    assert ajustados.tbr == pytest.approx(33.333, abs=0.01)  # 80 está por debajo de 90
-    assert ajustados.tar == pytest.approx(33.333, abs=0.01)  # 160 está por encima de 140
-    assert ajustados.tir == por_omision.tir == 100.0  # el TIR sigue siendo 70-180
+    assert ajustados.tbr == pytest.approx(33.333, abs=0.01)   # 80 está por debajo de 90
+    assert ajustados.tar == pytest.approx(33.333, abs=0.01)   # 160 está por encima de 140
+    assert ajustados.tir == por_omision.tir == 100.0          # el TIR sigue siendo 70-180
 
 
 def test_sin_lecturas_no_se_muestra_cero_sino_que_falta_dato():
@@ -172,7 +168,6 @@ def test_sin_lecturas_no_se_muestra_cero_sino_que_falta_dato():
 
 
 # --- Modo y alerta ----------------------------------------------------------
-
 
 def test_P03_lectura_vieja_degrada_a_modo_sin_sensor():
     """P-03: pasado el umbral de frescura la app no sigue prediciendo con datos viejos."""
@@ -194,7 +189,6 @@ def test_P04_sin_sensor_no_hay_alerta_anticipada():
 
 # --- Sincronización ---------------------------------------------------------
 
-
 def test_P08_no_sincroniza_con_datos_moviles_salvo_que_el_usuario_lo_fuerce():
     assert not debe_sincronizar(hay_wifi=False, pendientes=12)
     assert debe_sincronizar(hay_wifi=False, pendientes=12, forzado_por_usuario=True)
@@ -204,14 +198,13 @@ def test_P08_no_sincroniza_con_datos_moviles_salvo_que_el_usuario_lo_fuerce():
 
 # --- Métricas del modelo ----------------------------------------------------
 
-
 def test_clarke_zona_a_cuando_el_error_es_menor_al_20_por_ciento():
     assert zona_clarke(100, 110) == "A"
-    assert zona_clarke(60, 65) == "A"  # los dos por debajo de 70
+    assert zona_clarke(60, 65) == "A"      # los dos por debajo de 70
 
 
 def test_clarke_zona_e_es_la_inversion_peligrosa():
-    assert zona_clarke(60, 200) == "E"  # dice hiper cuando hay hipo
+    assert zona_clarke(60, 200) == "E"     # dice hiper cuando hay hipo
     assert zona_clarke(200, 60) == "E"
 
 
@@ -303,7 +296,6 @@ def test_sin_alertas_la_tasa_de_falsas_alarmas_es_cero():
 
 
 # --- Plantilla determinista -------------------------------------------------
-
 
 def test_P13_la_plantilla_no_depende_de_nada_externo_y_no_sugiere_dosis():
     """P-13: si el modelo de lenguaje no responde en 10 s, entra esta plantilla."""
