@@ -10,7 +10,7 @@ en `/docs`.
 | `/meals` | POST | lote de comidas | **fase 2, paso 2** |
 | `/insulin` | POST | lote de dosis | **fase 2, paso 2** |
 | `/perfil` | POST | los seis parámetros clínicos del perfil (el octavo, C-7) | **fase 2, paso 2** |
-| `/predict` | GET | predicción a 30 y 60 min y con qué modo respondió | paso 5 |
+| `/predict` | GET | predicción a 30 y 60 min y con qué modo respondió | **fase 2, paso 5** |
 | `/explain` | POST | explicación en lenguaje natural | **fase 2, paso 6** |
 | `/stats` | GET | TIR, promedio, GMI, coeficiente de variación | **fase 2, paso 3** |
 | `/history` | GET | histórico para el panel y la exportación | **fase 2, paso 3** |
@@ -512,6 +512,166 @@ B=$(python scripts/token-de-prueba.py 22222222-2222-2222-2222-222222222222)
 curl -s "localhost:8000/history?desde=2026-10-01T00:00:00Z&hasta=2026-11-01T00:00:00Z" \
   -H "Authorization: Bearer $B"
 # {"lecturas":[],"comidas":[],"dosis":[],"siguiente":null}
+```
+
+---
+
+## `GET /predict`
+
+La predicción a 30 y 60 minutos, **y con qué modo respondió** (RF-21, RF-26). Sin parámetros: el
+periodo lo decide el servidor, que lee la última ventana de lecturas de quien trae el token.
+
+Responde en **menos de 200 ms** porque el artefacto del modelo ya está en memoria: se carga una
+vez al arrancar. Cargarlo por petición costaría más que predecir.
+
+### El modo manda, y en modo sin sensor se declara
+
+Dos respuestas distintas, las dos con código `200`:
+
+| Modo | Cuándo | Qué devuelve |
+| --- | --- | --- |
+| `sensor` | la última lectura **del sensor** tiene menos de 15 minutos | las dos predicciones, cada una con su SHAP y su versión del modelo |
+| `sin_sensor` | no hay sensor, o la última lectura ya pasó los 15 minutos | `predicciones: []`, `puede_alertar_hipoglucemia: false` y el `aviso` |
+
+Que una lectura vieja degrade a modo sin sensor es el caso P-03, y que en ese modo **no se
+anticipe una hipoglucemia** es RF-10b y el caso P-04. Proyectar con datos de hace cuarenta
+minutos daría un número de apariencia normal y sin sustento; el aviso es la respuesta honesta.
+
+Una serie de pinchazos tampoco da modo sensor, por fresca que sea: el juego denso vive de
+rezagos y derivadas, y tres mediciones sueltas no son una serie continua.
+
+### Respuesta en modo sensor
+
+```json
+{
+  "ts_utc": "2026-10-29T01:05:15.364627Z",
+  "modo": "sensor",
+  "valor_actual": 124.0,
+  "antiguedad_min": 0.0,
+  "puede_alertar_hipoglucemia": true,
+  "umbral_hipo": 70,
+  "umbral_hiper": 180,
+  "predicciones": [
+    {
+      "horizonte_min": 30,
+      "valor_predicho": 113.2,
+      "modelo_version": "m1-v0.1.0",
+      "alerta": null,
+      "shap": [
+        {"variable": "mg_dl", "mg_dl": -24.7},
+        {"variable": "hora_sin", "mg_dl": 0.6},
+        {"variable": "derivada_2", "mg_dl": -0.2},
+        {"variable": "hora_cos", "mg_dl": -0.2},
+        {"variable": "rezago_5", "mg_dl": 0.0}
+      ]
+    },
+    {
+      "horizonte_min": 60,
+      "valor_predicho": 100.7,
+      "modelo_version": "m2-v0.1.0",
+      "alerta": null,
+      "shap": [{"variable": "mg_dl", "mg_dl": -22.0}, "…"]
+    }
+  ],
+  "aviso": null
+}
+```
+
+`valor_actual` es el último punto **ya limpio**: la serie del sensor pasa por el mismo
+`limpiar()` del pipeline antes de predecir, así que sale suavizado y sin atípicos. Las cifras
+del ejemplo salen de un modelo de juguete, el de las pruebas; los números de verdad llegan con
+el artefacto de la fase 3.
+
+Las cinco contribuciones son **TreeSHAP exacto, del propio XGBoost**, ordenadas de mayor a menor
+en valor absoluto, y son exactamente lo que el teléfono le pasa a `POST /explain`.
+
+### Respuesta en modo sin sensor
+
+```json
+{
+  "ts_utc": "2026-10-29T01:04:59.563075Z",
+  "modo": "sin_sensor",
+  "valor_actual": null,
+  "antiguedad_min": null,
+  "puede_alertar_hipoglucemia": false,
+  "umbral_hipo": 70,
+  "umbral_hiper": 180,
+  "predicciones": [],
+  "aviso": "Sin sensor conectado no se puede anticipar una glucosa baja: solo se estima a partir de mediciones sueltas, y conviene medirte antes de actuar."
+}
+```
+
+### La alerta se deriva del valor, no la predice el modelo
+
+`alerta` es `"hipoglucemia"` si el valor predicho queda por debajo del umbral hipo del perfil,
+`"hiperglucemia"` si queda por encima del hiper, y `null` si no. Los umbrales salen de
+`POST /perfil`; sin perfil son 70 y 180 y vienen en la respuesta para que la app enseñe contra
+qué se comparó.
+
+Son modelos de **regresión**, no clasificadores de «va a haber hipoglucemia o no». Así la
+persona ve la curva y entiende por qué se disparó la alerta, en lugar de recibir un sí o un no
+sin explicación.
+
+### Los códigos
+
+| Código | Cuándo | Qué hace el teléfono |
+| --- | --- | --- |
+| `200` | siempre que haya modelo, en los dos modos | enseña lo que vino, y en modo sin sensor el aviso |
+| `401` | falta el token, no se verifica o venció | renueva y reintenta una vez |
+| `503` | no hay artefacto del modelo cargado | sigue funcionando en local; no enseña predicción |
+
+**No hay número de respaldo a propósito.** Una línea base de persistencia —«dentro de 30
+minutos será igual que ahora»— es una herramienta para evaluar el modelo, y presentarla como
+predicción sería enseñar una cifra que nadie validó.
+
+### Cada predicción queda registrada
+
+Cada respuesta en modo sensor deja una fila en `predictions` con el instante, el horizonte, el
+valor y **la versión del modelo que lo calculó** (RF-25). Sin esa fila no se puede comparar
+después la predicción con lo que de verdad pasó, que es la mitad de la evaluación del reporte.
+
+La llave natural es `(usuario_uuid, ts_utc, horizonte_min, modelo_version)` y el `insert` es un
+`upsert`: pedir dos veces la predicción del mismo instante no acumula filas. Sin esa llave, una
+app que reintenta llenaría la tabla de duplicados y el error medio saldría pesado hacia los
+instantes que se consultaron más veces.
+
+### El artefacto, y la comprobación que evita el error más caro
+
+El modelo se lee de la carpeta `GLUCY_RUTA_ARTEFACTO_MODELO`, donde `glucy-ml` deja un
+manifiesto por modelo:
+
+```json
+{
+  "version": "m1-v0.1.0",
+  "algoritmo": "xgboost",
+  "horizonte_min": 30,
+  "juego": "denso",
+  "caracteristicas": ["mg_dl", "rezago_5", "rezago_10", "…"],
+  "archivo": "m1-v0.1.0.json",
+  "metricas": {"rmse": 18.2, "clarke_ab": 96.1}
+}
+```
+
+El manifiesto **declara la lista de características y el servidor la compara** contra la que
+produce el pipeline. Si no coinciden, el artefacto no se carga y `/predict` contesta `503`. Es
+la comprobación más valiosa del paso: alimentar el modelo con las columnas cambiadas de lugar da
+números plausibles y equivocados, y nada falla. Un manifiesto malo se registra y se salta, así
+que uno roto no tira los demás.
+
+**Sin carpeta configurada la API arranca igual** y este endpoint contesta `503`: una app que
+solo quiere subir sus lecturas no necesita el modelo para nada (regla 1).
+
+### Configuración
+
+```
+GLUCY_RUTA_ARTEFACTO_MODELO=    # vacío = sin modelo, y /predict contesta 503
+```
+
+### Prueba a mano
+
+```bash
+curl -s localhost:8000/predict -H "Authorization: Bearer $TOKEN" | python -m json.tool
+# sin artefacto: {"detail":"no hay modelo cargado para 30 minutos"} con código 503
 ```
 
 ---

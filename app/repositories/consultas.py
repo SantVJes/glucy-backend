@@ -73,6 +73,15 @@ def umbrales_del_perfil(sesion: Session, usuario_uuid: UUID) -> tuple[float, flo
     return fila.umbral_hipo, fila.umbral_hiper
 
 
+def perfil(sesion: Session, usuario_uuid: UUID) -> Usuario | None:
+    """La fila de `usuarios`, o `None` si el perfil no ha llegado.
+
+    `/predict` necesita el perfil completo y no solo los umbrales: la duración de acción de la
+    insulina entra en el IOB, que es una de las características del modelo (paso 5).
+    """
+    return sesion.get(Usuario, usuario_uuid)
+
+
 def _del_periodo(sesion, modelo, usuario_uuid, desde, hasta, limite, cursor):
     """La consulta común, con el filtro por dueño siempre puesto.
 
