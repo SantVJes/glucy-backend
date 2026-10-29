@@ -53,6 +53,10 @@ class PrediccionHorizonte(BaseModel):
     """Una predicción, con la versión del modelo que la calculó (RF-25)."""
 
     horizonte_min: int
+    #: El instante al que apunta: `ts_base` más el horizonte, **no el reloj más el horizonte**.
+    #: Va explícito porque la app tiene que enseñar la hora y no «dentro de 30 minutos»: con
+    #: una lectura de doce minutos de antigüedad, una predicción a 30 alcanza a dieciocho.
+    ts_objetivo: datetime
     valor_predicho: float
     modelo_version: str
     alerta: Alerta | None = None
@@ -72,6 +76,14 @@ class RespuestaPredecir(BaseModel):
     modo: Modo
     valor_actual: float | None
     antiguedad_min: float | None
+    #: El instante de la última lectura del **sensor**, que es donde se armó la fila y desde
+    #: donde se cuenta el horizonte. `None` en modo sin sensor, donde no hay predicción.
+    #:
+    #: `valor_actual` puede no ser este valor: es la última lectura de cualquier origen, y un
+    #: pinchazo capturado hace un minuto no entra al juego denso, que se construye sobre la
+    #: serie continua. Son dos cosas distintas y la app las enseña distinto.
+    ts_base: datetime | None = None
+    valor_base: float | None = None
     puede_alertar_hipoglucemia: bool
     umbral_hipo: float
     umbral_hiper: float

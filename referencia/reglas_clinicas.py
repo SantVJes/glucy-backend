@@ -24,29 +24,29 @@ from enum import StrEnum
 # Constantes. Que vivan en un solo lugar, no repartidas por el código.
 # ---------------------------------------------------------------------------
 
-GLUCOSA_MIN = 20             # mg/dL, RF-05
-GLUCOSA_MAX = 600            # mg/dL, RF-05
-UMBRAL_HIPO_DEFECTO = 70     # configurable 50-90
-UMBRAL_HIPER_DEFECTO = 180   # configurable 140-300
-RANGO_OBJETIVO = (70, 180)   # para el TIR
+GLUCOSA_MIN = 20  # mg/dL, RF-05
+GLUCOSA_MAX = 600  # mg/dL, RF-05
+UMBRAL_HIPO_DEFECTO = 70  # configurable 50-90
+UMBRAL_HIPER_DEFECTO = 180  # configurable 140-300
+RANGO_OBJETIVO = (70, 180)  # para el TIR
 
 ABSORCION_DEFECTO_MIN = 180  # D-8; presets 30 (rápida) y 300 (lenta)
 ABSORCION_MIN, ABSORCION_MAX = 30, 300
 
-DIA_DEFECTO_H = 5            # duración de acción de la insulina, rango 2-8
+DIA_DEFECTO_H = 5  # duración de acción de la insulina, rango 2-8
 DIA_RANGO_H = (2, 8)
-PICO_INSULINA_MIN = 75       # insulinas rápidas (55 en ultrarrápidas)
+PICO_INSULINA_MIN = 75  # insulinas rápidas (55 en ultrarrápidas)
 
-FRESCURA_SENSOR_MIN = 15     # D-13: recomendación adoptada, pendiente de confirmar
-INTERPOLACION_MAX_MIN = 15   # RF-23
+FRESCURA_SENSOR_MIN = 15  # D-13: recomendación adoptada, pendiente de confirmar
+INTERPOLACION_MAX_MIN = 15  # RF-23
 TASA_CAMBIO_IMPOSIBLE = 4.0  # mg/dL por minuto, solo en serie continua
 
-UMBRAL_HIPO_RANGO = (50, 90)     # lo que el perfil puede mover
+UMBRAL_HIPO_RANGO = (50, 90)  # lo que el perfil puede mover
 UMBRAL_HIPER_RANGO = (140, 300)
 
 CARBS_MIN_G = 0
 CARBS_MAX_G = 300
-INSULINA_MIN_UI = 0          # estricto: cero no es una dosis, es un campo sin llenar
+INSULINA_MIN_UI = 0  # estricto: cero no es una dosis, es un campo sin llenar
 INSULINA_MAX_UI = 50
 INSULINA_RESOLUCION_UI = 0.5  # la pluma dosifica de media en media unidad
 PESO_MIN_KG, PESO_MAX_KG = 25, 300
@@ -80,9 +80,11 @@ class Modo(StrEnum):
 #    backend antes de persistir: un servidor nunca debe confiar en lo que le mandan.
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Rechazo:
     """Un rechazo nunca es un descarte silencioso: lleva su motivo y va a cuarentena."""
+
     motivo: str
 
 
@@ -126,9 +128,7 @@ def validar_comida(
     if not (CARBS_MIN_G <= carbs_g <= CARBS_MAX_G):
         return Rechazo(f"carbohidratos fuera del rango {CARBS_MIN_G}-{CARBS_MAX_G} g")
     if not (ABSORCION_MIN <= tiempo_absorcion_min <= ABSORCION_MAX):
-        return Rechazo(
-            f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min"
-        )
+        return Rechazo(f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min")
     if not porciones > 0:
         return Rechazo("porciones tiene que ser mayor que cero")
     # Una comida futura llegaría a `cob` con minutos negativos.
@@ -202,9 +202,7 @@ def validar_perfil(
     if not (bajo <= duracion_accion_h <= alto):
         return Rechazo(f"duración de acción de la insulina fuera del rango {bajo}-{alto} h")
     if not (ABSORCION_MIN <= tiempo_absorcion_min <= ABSORCION_MAX):
-        return Rechazo(
-            f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min"
-        )
+        return Rechazo(f"tiempo de absorción fuera del rango {ABSORCION_MIN}-{ABSORCION_MAX} min")
     return None
 
 
@@ -236,8 +234,10 @@ def se_puede_interpolar(hueco_min: float, origen: Origen) -> bool:
 # 2. Carbohidratos activos (COB). Absorción lineal, sin modelo fisiológico (D-8).
 # ---------------------------------------------------------------------------
 
-def cob(carbs_g: float, minutos_desde_comida: float,
-        tiempo_absorcion_min: int = ABSORCION_DEFECTO_MIN) -> float:
+
+def cob(
+    carbs_g: float, minutos_desde_comida: float, tiempo_absorcion_min: int = ABSORCION_DEFECTO_MIN
+) -> float:
     """COB(t) = carbs × (1 − t / tiempo_absorcion), y 0 pasado ese tiempo.
 
     Es una simplificación consciente y documentada, con el valor por omisión tomado de
@@ -271,8 +271,10 @@ def cob_total(comidas: list[tuple[float, float, int]]) -> float:
 # 3. Insulina activa (IOB). Modelo exponencial, el de los sistemas de lazo cerrado abierto.
 # ---------------------------------------------------------------------------
 
-def fraccion_insulina_activa(minutos: float, dia_h: float = DIA_DEFECTO_H,
-                             pico_min: float = PICO_INSULINA_MIN) -> float:
+
+def fraccion_insulina_activa(
+    minutos: float, dia_h: float = DIA_DEFECTO_H, pico_min: float = PICO_INSULINA_MIN
+) -> float:
     """Fracción de una dosis que sigue activa a los `minutos` indicados.
 
     Curva exponencial con pico ~75 min y duración de acción de 5 h por omisión (rango
@@ -292,8 +294,11 @@ def fraccion_insulina_activa(minutos: float, dia_h: float = DIA_DEFECTO_H,
     return min(1.0, max(0.0, restante))
 
 
-def iob(dosis: list[tuple[float, float]], dia_h: float = DIA_DEFECTO_H,
-        pico_min: float = PICO_INSULINA_MIN) -> float:
+def iob(
+    dosis: list[tuple[float, float]],
+    dia_h: float = DIA_DEFECTO_H,
+    pico_min: float = PICO_INSULINA_MIN,
+) -> float:
     """Insulina activa total. Cada tupla es (unidades, minutos_desde_la_dosis).
 
     Solo cuenta la insulina de bolo: la basal no se acumula como insulina activa en este
@@ -305,6 +310,7 @@ def iob(dosis: list[tuple[float, float]], dia_h: float = DIA_DEFECTO_H,
 # ---------------------------------------------------------------------------
 # 4. Indicadores clínicos. Se calculan en el teléfono, sin backend.
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Indicadores:
@@ -335,8 +341,11 @@ def gmi_es_fiable(dias_con_lecturas: int) -> bool:
     return dias_con_lecturas >= DIAS_MINIMOS_GMI
 
 
-def indicadores(valores: list[float], umbral_hipo: int = UMBRAL_HIPO_DEFECTO,
-                umbral_hiper: int = UMBRAL_HIPER_DEFECTO) -> Indicadores:
+def indicadores(
+    valores: list[float],
+    umbral_hipo: int = UMBRAL_HIPO_DEFECTO,
+    umbral_hiper: int = UMBRAL_HIPER_DEFECTO,
+) -> Indicadores:
     """TIR, TBR, TAR, promedio, desviación, CV y GMI.
 
     GMI = 3.31 + 0.02392 × glucosa media en mg/dL.
@@ -377,8 +386,13 @@ def indicadores(valores: list[float], umbral_hipo: int = UMBRAL_HIPO_DEFECTO,
 # 5. Decisión de modo (RF-06c). La regla que evita predecir con datos rancios.
 # ---------------------------------------------------------------------------
 
-def modo_actual(lectura_healthkit_activa: bool, ts_ultima_sensor: datetime | None,
-                ahora: datetime, frescura_min: int = FRESCURA_SENSOR_MIN) -> Modo:
+
+def modo_actual(
+    lectura_healthkit_activa: bool,
+    ts_ultima_sensor: datetime | None,
+    ahora: datetime,
+    frescura_min: int = FRESCURA_SENSOR_MIN,
+) -> Modo:
     """Devuelve el modo en el que la app tiene derecho a estar.
 
     Si la última lectura del sensor pasa el umbral de frescura, degrada a modo sin sensor
@@ -403,6 +417,7 @@ def puede_alertar_hipoglucemia(modo: Modo) -> bool:
 # 6. Sincronización (RF-35, RF-36). Solo wifi, por lotes, lo más antiguo primero.
 # ---------------------------------------------------------------------------
 
+
 def debe_sincronizar(hay_wifi: bool, pendientes: int, forzado_por_usuario: bool = False) -> bool:
     """No sincroniza con datos móviles salvo que la persona toque «sincronizar ahora».
 
@@ -417,6 +432,7 @@ def debe_sincronizar(hay_wifi: bool, pendientes: int, forzado_por_usuario: bool 
 # ---------------------------------------------------------------------------
 # 7. Métricas de evaluación del modelo.
 # ---------------------------------------------------------------------------
+
 
 def rmse(reales: list[float], predichos: list[float]) -> float:
     n = len(reales)
@@ -516,8 +532,9 @@ def porcentaje_clarke_ab(reales: list[float], predichos: list[float]) -> float:
     return 100 * sum(1 for z in zonas if z in ("A", "B")) / len(zonas)
 
 
-def sensibilidad_hipoglucemia(reales: list[float], predichos: list[float],
-                              umbral: int = UMBRAL_HIPO_DEFECTO) -> float:
+def sensibilidad_hipoglucemia(
+    reales: list[float], predichos: list[float], umbral: int = UMBRAL_HIPO_DEFECTO
+) -> float:
     """De los episodios reales por debajo del umbral, cuántos se anticiparon. Meta ≥ 85 %."""
     episodios = [(r, p) for r, p in zip(reales, predichos, strict=True) if r < umbral]
     if not episodios:
@@ -525,8 +542,9 @@ def sensibilidad_hipoglucemia(reales: list[float], predichos: list[float],
     return 100 * sum(1 for _, p in episodios if p < umbral) / len(episodios)
 
 
-def tasa_falsas_alarmas(reales: list[float], predichos: list[float],
-                        umbral: int = UMBRAL_HIPO_DEFECTO) -> float:
+def tasa_falsas_alarmas(
+    reales: list[float], predichos: list[float], umbral: int = UMBRAL_HIPO_DEFECTO
+) -> float:
     """De todas las alertas emitidas, cuántas no correspondieron a un episodio real.
 
     Meta ≤ 15 %, y se trata como criterio de aceptación: si la app alerta de más, la
@@ -553,8 +571,10 @@ def linea_base_persistencia(serie: list[float], pasos_horizonte: int) -> list[fl
 # 8. Plantilla determinista de la explicación (el respaldo del punto 11.8).
 # ---------------------------------------------------------------------------
 
-def plantilla_explicacion(valor_actual: float, valor_predicho: float,
-                          shap: list[tuple[str, float]]) -> str:
+
+def plantilla_explicacion(
+    valor_actual: float, valor_predicho: float, shap: list[tuple[str, float]]
+) -> str:
     """Explicación armada por programa a partir de los mismos valores SHAP.
 
     Se usa cuando el modelo de lenguaje no responde en 10 s, cuando la respuesta no pasa
