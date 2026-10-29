@@ -28,6 +28,27 @@ class ContribucionShap(BaseModel):
     mg_dl: float
 
 
+class Factor(BaseModel):
+    """Una contribución **lista para enseñarse**: con nombre en palabras y ya sumada.
+
+    Va aparte de `shap` y no en su lugar porque las dos listas tienen consumidores distintos.
+    `shap` es el contrato con el pipeline y con glucy-ml, y `/explain` lo necesita crudo.
+    `factores` es lo que dibuja la pantalla de factores de la app, y ahí `rezago_30` no puede
+    aparecer: la regla del proyecto es que en la superficie no hay tecnicismos.
+
+    Son dos listas y no una porque `hora_sin` y `hora_cos` son **una sola idea** para quien lee
+    —la hora del día— y dos columnas para el modelo. SHAP es aditivo, así que aquí se suman; en
+    `shap` se quedan separadas, que es lo que el modelo entiende.
+
+    Que la app no tenga que traducir también es a propósito: un diccionario de nombres de
+    características repetido en Swift se queda viejo el día que el pipeline agrega una columna,
+    y nadie se entera hasta que alguien lee «rezago_45» en la pantalla.
+    """
+
+    nombre: str
+    mg_dl: float
+
+
 class PrediccionHorizonte(BaseModel):
     """Una predicción, con la versión del modelo que la calculó (RF-25)."""
 
@@ -36,6 +57,7 @@ class PrediccionHorizonte(BaseModel):
     modelo_version: str
     alerta: Alerta | None = None
     shap: list[ContribucionShap]
+    factores: list[Factor]
 
 
 class RespuestaPredecir(BaseModel):

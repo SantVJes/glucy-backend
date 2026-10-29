@@ -8,9 +8,9 @@ modelo de lenguaje, que es donde más daño hacían.
 import pytest
 
 from app.schemas.explicacion import ContribucionShap, ExplicacionEntrada
-from app.services.explicacion.nombres import NOMBRES, legible, legibles
 from app.services.explicacion.prompt import mensaje_de_usuario
 from app.services.explicacion.validacion import numeros, revisar
+from app.services.nombres import NOMBRES, legible, legibles
 from app.services.pipeline.caracteristicas import (
     CARACTERISTICAS_DENSAS,
     CARACTERISTICAS_DISPERSAS,
