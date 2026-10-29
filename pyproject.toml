@@ -12,6 +12,12 @@ target-version = "py312"
 # E, F: errores y pyflakes. I: orden de los imports. UP: modernizaciones de sintaxis.
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# E402: la pantalla del simulador tiene que poner la raíz del repositorio en `sys.path`
+# **antes** de importar `app...`, porque Streamlit solo garantiza la carpeta del script. El
+# import no puede ir arriba: ahí está el motivo, no un descuido.
+"simulador/pantalla.py" = ["E402"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

@@ -115,7 +115,7 @@ def predecir(
                 horizonte_min=horizonte,
                 valor_predicho=round(valor, 1),
                 modelo_version=artefacto.version,
-                alerta=_alerta(valor, umbral_hipo, umbral_hiper),
+                alerta=alerta_de(valor, umbral_hipo, umbral_hiper),
                 shap=[
                     ContribucionShap(variable=nombre, mg_dl=round(aporte, 1))
                     for nombre, aporte in contribuciones
@@ -125,7 +125,7 @@ def predecir(
     return RespuestaPredecir(**base, predicciones=predicciones)
 
 
-def _alerta(valor: float, umbral_hipo: float, umbral_hiper: float) -> str | None:
+def alerta_de(valor: float, umbral_hipo: float, umbral_hiper: float) -> str | None:
     """La alerta sale del valor y del umbral del perfil, no de una clase que prediga el modelo."""
     if math.isnan(valor):
         return None
