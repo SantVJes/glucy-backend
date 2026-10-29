@@ -15,3 +15,9 @@ psycopg[binary]>=3.2
 # El cliente del modelo de lenguaje (paso 6). Se usa httpx y no urllib porque el tope de
 # 10 s tiene que cubrir toda la llamada, no solo la conexión.
 httpx>=0.27
+# El modelo predictivo que entrena glucy-ml (paso 5). Se usa la rueda **sin CUDA**:
+# `xgboost` arrastra nvidia-nccl y son 305 MB en un servidor que no tiene GPU;
+# `xgboost-cpu` son 5.8 MB de rueda y 24 MB instalados. Las contribuciones SHAP las
+# calcula el propio XGBoost (`pred_contribs`), así que no hace falta la biblioteca
+# `shap` en el servidor.
+xgboost-cpu>=3.0

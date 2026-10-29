@@ -12,12 +12,14 @@ borra el esquema `public` de esa base**: no se apunta nunca a una base con datos
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import Engine, select, text
+from sqlalchemy.exc import OperationalError
 
 from app.db.sesion import crear_motor
 from app.models.tablas import AgregadoDiario, Comida, LecturaGlucosa, SerieLimpia, Usuario
@@ -33,14 +35,44 @@ pytestmark = [
 INICIO = datetime(2026, 9, 1, 6, 0, tzinfo=UTC)
 
 
+# Cuántas veces se reintenta dejar el esquema vacío, y cuánto se espera entre intentos.
+REINTENTOS_DEL_DROP = 5
+ESPERA_ENTRE_INTENTOS_S = 0.5
+
+
+def vaciar_el_esquema() -> None:
+    """Deja `public` vacío, reintentando si TimescaleDB se interpone.
+
+    Los trabajadores en segundo plano de TimescaleDB toman locks compartidos sobre sus
+    catálogos cada pocos segundos, y `DROP SCHEMA public CASCADE` necesita el lock exclusivo
+    de la hipertabla. Cuando coinciden, PostgreSQL mata a uno de los dos por interbloqueo, y
+    el que muere suele ser el drop.
+
+    Eso no es un error del código ni de la migración: **el drop es andamio de la prueba**, y
+    el trabajador termina en un segundo. Por eso se reintenta, con `lock_timeout` para no
+    quedarse colgado esperando. Dejarlo sin reintento teñía la corrida de rojo por una
+    carrera que no tiene nada que ver con lo que se está probando.
+    """
+    for intento in range(REINTENTOS_DEL_DROP):
+        limpio = crear_motor(URL)
+        try:
+            with limpio.begin() as conexion:
+                conexion.execute(text("SET lock_timeout = '5s'"))
+                conexion.execute(text("DROP SCHEMA public CASCADE"))
+                conexion.execute(text("CREATE SCHEMA public"))
+            return
+        except OperationalError:
+            if intento == REINTENTOS_DEL_DROP - 1:
+                raise
+            time.sleep(ESPERA_ENTRE_INTENTOS_S * (intento + 1))
+        finally:
+            limpio.dispose()
+
+
 @pytest.fixture
 def motor() -> Iterator[Engine]:
     """Una base vacía y migrada con `alembic upgrade head` para cada prueba."""
-    limpio = crear_motor(URL)
-    with limpio.begin() as conexion:
-        conexion.execute(text("DROP SCHEMA public CASCADE"))
-        conexion.execute(text("CREATE SCHEMA public"))
-    limpio.dispose()
+    vaciar_el_esquema()
     migrar(URL)
     motor = crear_motor(URL)
     yield motor
