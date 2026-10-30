@@ -1,0 +1,43 @@
+# Learning Locker, el Learning Record Store de la fase 6. **Software de terceros**: se instala
+# y se consume, no se escribe aquí.
+#
+#   docker compose -f docker-compose.lrs.yml up -d
+#
+# Va en un archivo aparte del `docker-compose.yml` a propósito. Ninguna función de Glucy
+# depende del LRS: sin él las sentencias esperan en la cola, que es el comportamiento
+# diseñado. Mezclarlo con la API y la base haría que `docker compose up` arrastrara MongoDB y
+# Redis a cualquiera que solo quiera levantar el servidor.
+#
+# Solo el servicio que **recibe** sentencias. La interfaz web de Learning Locker es otra pieza
+# y no hace falta para que entren: el código de Glucy habla con este servicio y con nada más.
+# Después de levantarlo hay que dar de alta el cliente; las cuatro cosas que pide, y por qué,
+# están en `docs/lrs.md`.
+services:
+  lrs-mongo:
+    image: mongo:4.4
+    command: ["--bind_ip_all"]
+    volumes: [lrs_mongo:/data/db]
+
+  lrs-redis:
+    image: redis:7-alpine
+
+  lrs:
+    image: learninglocker/xapi-service:latest
+    depends_on: [lrs-mongo, lrs-redis]
+    environment:
+      EXPRESS_PORT: "8081"
+      MONGO_URL: "mongodb://lrs-mongo:27017/learninglocker_v2"
+      MONGO_DB: "learninglocker_v2"
+      REDIS_URL: "redis://lrs-redis:6379/0"
+      AUTH_REPO: "mongo"
+      MODELS_REPO: "mongo"
+      EVENTS_REPO: "redis"
+      STORAGE_REPO: "local"
+      FS_LOCAL_STORAGE_DIR: "/tmp/almacen"
+    # **Solo 127.0.0.1**, por lo mismo que el panel: con `8081:8081` Docker abre el puerto en
+    # todas las interfaces y atraviesa el cortafuegos del anfitrión sin avisar. La API le pega
+    # desde el propio servidor.
+    ports: ["127.0.0.1:8081:8081"]
+
+volumes:
+  lrs_mongo:
