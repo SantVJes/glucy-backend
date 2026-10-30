@@ -174,6 +174,84 @@ def test_106_con_sensor_fresco_responde_los_dos_horizontes(con_modelo: TestClien
     assert cuerpo["valor_actual"] == pytest.approx(100 + 2 * (PASOS - 1))
 
 
+def test_106b_la_fila_se_arma_en_la_ultima_lectura_y_no_en_el_reloj(con_modelo: TestClient):
+    """El error más caro que ha tenido este endpoint, y el que más fácil pasaba inadvertido.
+
+    La serie termina hace **ocho minutos**: sigue fresca (el umbral son 15) y el modo sigue
+    siendo sensor. Pero el reloj está a ocho minutos de la última lectura, o sea a más de media
+    muestra, así que armando la fila con `datetime.now()` `mg_dl` sale `NaN` y los rezagos
+    resuelven a la lectura de cinco minutos después de la que les toca.
+
+    El modelo de juguete del fixture aprendió `mg_dl × 0.9`, así que la prueba lo ve: con la
+    fila bien armada la predicción sale de la última lectura, y con la fila del reloj sale
+    cualquier otra cosa. Con el artefacto de verdad medimos que en esas filas el RMSE pasa de
+    11.9 a 125.2 mg/dL, con la predicción pegada a la media del entrenamiento.
+    """
+    ahora = datetime.now(UTC)
+    ultima_lectura = ahora - timedelta(minutes=8)
+    _subir_serie(con_modelo, ultima_lectura)
+    cuerpo = con_modelo.get("/predict", headers=cabeceras()).json()
+
+    assert cuerpo["modo"] == "sensor"
+    ultimo_valor = 100 + 2 * (PASOS - 1)
+    assert cuerpo["valor_base"] == pytest.approx(ultimo_valor)
+    assert datetime.fromisoformat(cuerpo["ts_base"]) == pytest.approx(
+        ultima_lectura, abs=timedelta(seconds=1)
+    )
+    # La predicción sale de `mg_dl`, que es lo que el modelo de juguete usa. Sin el arreglo
+    # `mg_dl` era `NaN` y esto fallaba.
+    assert cuerpo["predicciones"][0]["valor_predicho"] == pytest.approx(
+        ultimo_valor * 0.9, rel=0.15
+    )
+
+
+def test_106c_el_horizonte_se_cuenta_desde_la_lectura_y_la_respuesta_lo_dice(
+    con_modelo: TestClient,
+):
+    """Con una lectura de ocho minutos, «a 30 minutos» alcanza a veintidós desde el reloj.
+
+    Por eso va `ts_objetivo` en la respuesta y la app enseña la hora: decir «dentro de 30
+    minutos» sería mover la predicción ocho minutos hacia adelante sin avisar.
+    """
+    ultima_lectura = datetime.now(UTC) - timedelta(minutes=8)
+    _subir_serie(con_modelo, ultima_lectura)
+    cuerpo = con_modelo.get("/predict", headers=cabeceras()).json()
+
+    base = datetime.fromisoformat(cuerpo["ts_base"])
+    for prediccion in cuerpo["predicciones"]:
+        objetivo = datetime.fromisoformat(prediccion["ts_objetivo"])
+        assert objetivo == base + timedelta(minutes=prediccion["horizonte_min"])
+        # Y queda por delante del reloj: una predicción que apunta al pasado no es una
+        # predicción. La frescura de 15 min es lo que lo garantiza.
+        assert objetivo > datetime.now(UTC)
+
+
+def test_106d_un_pinchazo_mas_nuevo_no_mueve_la_base_de_la_fila(con_modelo: TestClient):
+    """El juego denso se construye sobre la serie continua, así que la base es del sensor.
+
+    `valor_actual` sí es el pinchazo: es lo último que la persona midió y es lo que la pantalla
+    enseña arriba. Son dos cosas distintas y la respuesta las separa.
+    """
+    ahora = datetime.now(UTC)
+    _subir_serie(con_modelo, ahora - timedelta(minutes=6))
+    manual = {
+        "uuid": str(uuid4()),
+        "ts_utc": (ahora - timedelta(minutes=1)).isoformat(),
+        "zona_horaria": "America/Monterrey",
+        "mg_dl": 211,
+        "origen": "manual",
+    }
+    assert (
+        con_modelo.post("/readings", json={"items": [manual]}, headers=cabeceras()).status_code
+        == 200
+    )
+
+    cuerpo = con_modelo.get("/predict", headers=cabeceras()).json()
+    assert cuerpo["valor_actual"] == pytest.approx(211)
+    assert cuerpo["valor_base"] == pytest.approx(100 + 2 * (PASOS - 1))
+    assert datetime.fromisoformat(cuerpo["ts_base"]) < datetime.fromisoformat(manual["ts_utc"])
+
+
 def test_107_p03_una_lectura_vieja_degrada_a_sin_sensor_y_lo_dice(con_modelo: TestClient):
     """Pasados los 15 minutos de frescura no se proyecta con datos viejos."""
     _subir_serie(con_modelo, datetime.now(UTC) - timedelta(minutes=40))
