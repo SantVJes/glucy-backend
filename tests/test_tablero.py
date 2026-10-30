@@ -188,3 +188,35 @@ def test_los_archivos_de_grafana_no_mencionan_nombres_de_personas():
         ).lower()
         for palabra in prohibidas:
             assert palabra not in cuerpo, f"{archivo.name}: «{palabra}»"
+
+
+def test_las_carpetas_de_aprovisionamiento_se_llaman_como_grafana_las_lee():
+    """`dashboards` y `datasources`, en inglés, porque Grafana no mira en otro sitio.
+
+    Es el único fallo de este tablero que no deja rastro visible: Grafana lee los proveedores
+    de tablero de `/etc/grafana/provisioning/dashboards` y, cuando esa carpeta no existe,
+    **no falla**. Anota un error en su bitácora, acaba de arrancar y se queda sin un solo
+    tablero. El origen de datos sí carga —su carpeta se llama `datasources`, en inglés por
+    casualidad—, así que el panel abre, se autentica, conecta con la base y está vacío: parece
+    que no hay datos, no que falte el tablero. Comprobado el 30/10/2026 levantando el
+    `docker compose`: con la carpeta llamada `tableros`, cero tableros.
+
+    No es una excepción a la regla del idioma del proyecto: son nombres de la plataforma, como
+    `router` o `session`.
+    """
+    provisioning = GRAFANA / "provisioning"
+    for nombre in ("dashboards", "datasources"):
+        carpeta = provisioning / nombre
+        assert carpeta.is_dir(), f"falta grafana/provisioning/{nombre}"
+        assert list(carpeta.glob("*.yml")), f"grafana/provisioning/{nombre} sin ningún .yml"
+    # Y que no quede la versión traducida, que es la que Grafana ignora en silencio.
+    assert not (provisioning / "tableros").exists()
+
+    # La carpeta del JSON sí es nuestra y puede llamarse en español, pero el `path` del
+    # proveedor y el punto de montaje del compose tienen que coincidir: si no, el proveedor
+    # apunta a una carpeta vacía y el resultado es el mismo panel en blanco.
+    proveedor = next((provisioning / "dashboards").glob("*.yml")).read_text()
+    compose = (RAIZ / "docker-compose.yml").read_text()
+    assert "path: /etc/grafana/tableros" in proveedor
+    assert "./grafana/tableros:/etc/grafana/tableros:ro" in compose
+    assert "./grafana/provisioning:/etc/grafana/provisioning:ro" in compose

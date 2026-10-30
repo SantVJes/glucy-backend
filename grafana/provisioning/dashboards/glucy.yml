@@ -1,5 +1,12 @@
 # El tablero se aprovisiona desde el archivo JSON del repositorio.
 #
+# **Esta carpeta se llama `dashboards` y no `tableros`.** No es una excepción a la regla del
+# idioma: es vocabulario de la plataforma, como `router` o `session`. Grafana lee los
+# proveedores de tablero de `/etc/grafana/provisioning/dashboards` y de ningún otro sitio, y
+# cuando la carpeta no existe **no falla**: registra un error en su bitácora, sigue
+# arrancando y se queda sin un solo tablero. El origen de datos funciona —su carpeta sí se
+# llama `datasources`—, así que el panel abre, conecta con la base y está vacío.
+#
 # `allowUiUpdates: false` a propósito: el tablero es código, se revisa en un pull request y se
 # puede volver a levantar idéntico en otra máquina. Un tablero editado a mano se pierde con el
 # contenedor y nadie se acuerda de qué decía el panel.
