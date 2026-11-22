@@ -223,6 +223,9 @@ su fase. GitHub Actions corre pruebas y análisis estático en cada pull request
 
 ## Dónde está el resto de la documentación
 
+**Si llegas sin contexto, empieza por [`docs/TRASPASO.md`](docs/TRASPASO.md)**: el estado real,
+lo que falta en orden, las trampas que ya costaron horas, y que el trabajo vive en `develop`.
+
 Carpeta `glucy-base` en los archivos del proyecto de Claude: `00-CONTEXTO-GLUCY.md` (el panorama y la
 tabla de constantes), `02-glucy-backend.md` (las doce tablas campo por campo y el detalle de
 cada endpoint), `04-PLAN-FASE-1.md` y `05-PENDIENTES-Y-CONTRADICCIONES.md`. La fuente es
